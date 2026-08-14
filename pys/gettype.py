@@ -40,10 +40,7 @@ def gettype(file) -> str:
 def findfile(file, dir_) -> str:
     for root, dirs, files in os.walk(dir_, topdown=True):
         if file in files:
-            if os.name == 'nt':
-                return (root + os.sep + file).replace("\\", '/')
-            else:
-                return root + os.sep + file
+            return root + os.sep + file
 
 
 if __name__ == "__main__":

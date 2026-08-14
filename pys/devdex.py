@@ -118,7 +118,7 @@ def deodex_file(path):
                 prefix = pathlib.Path(used_vdex).stem + '.apk_'
                 try:
                     add_dex_files_to_zip(path, temp_dir, prefix)
-                except:
+                except Exception:
                     subprocess.run(['ls', temp_dir])
                     raise
     for t in optimized_files:

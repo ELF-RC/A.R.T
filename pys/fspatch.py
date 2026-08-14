@@ -51,12 +51,7 @@ def scan_dir(folder: str) -> list:
     :return:
     """
     allfiles = ['/', '/lost+found']
-    if os.name == 'nt':
-        yield os.path.basename(folder).replace('\\', '')
-    elif os.name == 'posix':
-        yield os.path.basename(folder).replace('/', '')
-    else:
-        yield os.path.basename(folder)
+    yield os.path.basename(folder)
     for root, dirs, files in os.walk(folder, topdown=True):
         for dir_ in dirs:
             yield os.path.join(root, dir_).replace(folder, os.path.basename(folder)).replace('\\', '/')
@@ -71,14 +66,8 @@ def islink(file) -> str:
     :param file:
     :return:
     """
-    if os.name == 'nt':
-        if not os.path.isdir(file):
-            with open(file, 'rb') as f:
-                if f.read(10) == b'!<symlink>':
-                    return f.read().decode("utf-16")[:-1]
-    elif os.name == 'posix':
-        if os.path.islink(file):
-            return os.readlink(file)
+    if os.path.islink(file):
+        return os.readlink(file)
     return ''
 
 
@@ -104,10 +93,7 @@ def fs_patch(fs_file, dir_path) -> tuple:  # 接收两个字典对比
         else:
             if i in r_fs:
                 continue
-            if os.name == 'nt':
-                filepath = os.path.abspath(dir_path + os.sep + ".." + os.sep + i.replace('/', '\\'))
-            else:
-                filepath = os.path.abspath(dir_path + os.sep + ".." + os.sep + i)
+            filepath = os.path.abspath(dir_path + os.sep + ".." + os.sep + i)
             if os.path.isdir(filepath):
                 if "system/bin" in i or "system/xbin" in i or "vendor/bin" in i:
                     gid = '2000'

@@ -843,7 +843,7 @@ class Inode:
             try:
                 for xattr_name, xattr_value in self._parse_xattrs(inline_data[offset:], 0):
                     yield xattr_name, xattr_value
-            except BaseException and Exception:
+            except Exception:
                 ...
         # xattr block(s)
         if check_block and self.inode.i_file_acl != 0:

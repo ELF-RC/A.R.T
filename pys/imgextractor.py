@@ -5,11 +5,6 @@ import os
 import re
 import struct
 
-if os.name == 'nt':
-    from ctypes import windll
-    from ctypes.wintypes import LPCSTR, DWORD
-    from stat import FILE_ATTRIBUTE_SYSTEM
-
 from pys import ext4
 
 SPARSE_HEADER_MAGIC = 0xED26FF3A
@@ -316,7 +311,7 @@ class ULTRAMAN(object):
                 if entry_inode.is_symlink:
                     try:
                         link_target = entry_inode.open_read().read().decode("utf8")
-                    except Exception and BaseException:
+                    except Exception:
                         link_target_block = int.from_bytes(entry_inode.open_read().read(), "little")
                         link_target = root_inode.volume.read(link_target_block * root_inode.volume.block_size,
                                                              entry_inode.inode.i_size).decode("utf8")
@@ -329,12 +324,10 @@ class ULTRAMAN(object):
                         f'{tmp_path} {uid} {gid} {mode}{cap} {link_target}')
                 if entry_inode.is_dir:
                     dir_target = self.EXTRACT_DIR + entry_inode_path.replace(' ', '_').replace('"', '')
-                    if dir_target.endswith('.') and os.name == 'nt':
-                        dir_target = dir_target[:-1]
                     if not os.path.isdir(dir_target):
                         os.makedirs(dir_target)
 
-                    if os.name == 'posix' and os.geteuid() == 0:
+                    if os.geteuid() == 0:
                         os.chmod(dir_target, int(mode, 8))
                         os.chown(dir_target, uid, gid)
                     scan_dir(entry_inode, entry_inode_path)
@@ -343,9 +336,9 @@ class ULTRAMAN(object):
                     try:
                         with open(file_target, 'wb') as out:
                             out.write(entry_inode.open_read().read())
-                    except Exception and BaseException as e:
+                    except Exception as e:
                         print(f'[E] Cannot Write to {file_target}, Reason: {e}')
-                    if os.name == 'posix' and os.geteuid() == 0:
+                    if os.geteuid() == 0:
                         os.chmod(file_target, int(mode, 8))
                         os.chown(file_target, uid, gid)
                 elif entry_inode.is_symlink:
@@ -355,32 +348,14 @@ class ULTRAMAN(object):
                             try:
                                 os.remove(target)
                             finally:
-                                ...
-                        if os.name == 'posix':
-                            os.symlink(link_target, target)
-                        elif os.name == 'nt':
-                            with open(target.replace('/', os.sep), 'wb') as out:
-                                out.write(b'!<symlink>' + link_target.encode('utf-16') + b'\x00\x00')
-                                try:
-                                    windll.kernel32.SetFileAttributesA(LPCSTR(target.encode()),
-                                                                       DWORD(FILE_ATTRIBUTE_SYSTEM))
-                                except Exception as e:
-                                    print(e.__str__())
-                    except BaseException and Exception:
+                                pass
+                        os.symlink(link_target, target)
+                    except Exception:
                         try:
                             if link_target and link_target.isprintable():
-                                if os.name == 'posix':
-                                    os.symlink(link_target, target)
-                                elif os.name == 'nt':
-                                    with open(target.replace('/', os.sep), 'wb') as out:
-                                        out.write(b'!<symlink>' + link_target.encode('utf-16') + b'\x00\x00')
-                                    try:
-                                        windll.kernel32.SetFileAttributesA(LPCSTR(target.encode()),
-                                                                           DWORD(FILE_ATTRIBUTE_SYSTEM))
-                                    except Exception as e:
-                                        print(e.__str__())
+                                os.symlink(link_target, target)
                         finally:
-                            ...
+                            pass
 
         if not os.path.isdir(CONFIGS_DIR):
             os.makedirs(CONFIGS_DIR)

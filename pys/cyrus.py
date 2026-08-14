@@ -24,30 +24,12 @@ from pys import imgextractor
 from pys import sdat2img
 from pys import gettype
 from pys import lpunpack
-if os.name == 'nt':
-    import ctypes
-    from tkinter.filedialog import askopenfilename
-
-    ctypes.windll.kernel32.SetConsoleTitleW("DNA-3")
-else:
-    sys.stdout.write("\x1b]2;DNA-3\x07")
-    sys.stdout.flush()
-IS_ARM64 = False
 PWD_DIR = os.getcwd() + os.sep
 MOD_DIR = PWD_DIR + "local/sub/"
 ROM_DIR = PWD_DIR
 SETUP_JSON = PWD_DIR + "local/set/setup.json"
 MAGISK_JSON = PWD_DIR + "local/set/magisk.json"
-ostype = platform.system()
-if os.getenv('PREFIX'):
-    if "com.termux" in os.getenv('PREFIX'):
-        ostype = 'Android'
-if platform.machine() in ('aarch64', 'armv8l', 'arm64'):
-    ostype = 'Android'
-    if os.path.isdir("/sdcard/Download"):
-        IS_ARM64 = True
-        ROM_DIR = "/sdcard/Download/"
-BIN_PATH = PWD_DIR + f"local/bin/{ostype}/{platform.machine()}/"
+BIN_PATH = PWD_DIR + "local/bin/Linux/x86_64/"
 RED, WHITE, CYAN, YELLOW, MAGENTA, GREEN, BOLD, CLOSE = ['\x1b[91m',
                                                          '\x1b[97m', '\x1b[36m',
                                                          '\x1b[93m', '\x1b[1;35m',
@@ -61,8 +43,6 @@ class GlobalValue(object):
     def __init__(self):
         self.programs = ["mv", "cpio", "brotli", "img2simg", "e2fsck", "resize2fs",
                          "mke2fs", "e2fsdroid", "mkfs.erofs", "lpmake", "extract.erofs", "magiskboot"]
-        if os.name == 'nt':
-            self.programs = []
 
     def __getattr__(self, item):
         try:
@@ -83,27 +63,23 @@ def change_permissions_recursive(path, mode):
     os.chmod(path, mode)
 
 
-if os.path.isdir(BIN_PATH):
-    os.environ["PATH"] += os.pathsep + BIN_PATH
-    if os.name == 'posix':
-        change_permissions_recursive(BIN_PATH, 0o777)
-
-    for prog in V.programs:
-        if not shutil.which(prog):
-            sys.exit(f"[x] Not found: {prog}\n[i] Please install {prog} \n   Or add <{prog}> to {BIN_PATH}")
-else:
+if not os.path.isdir(BIN_PATH):
     print(f"Run err on: {platform.system()} {platform.machine()}")
     sys.exit()
+
+os.environ["PATH"] += os.pathsep + BIN_PATH
+change_permissions_recursive(BIN_PATH, 0o777)
+
+for prog in V.programs:
+    if not shutil.which(prog):
+        sys.exit(f"[x] Not found: {prog}\n[i] Please install {prog} \n   Or add <{prog}> to {BIN_PATH}")
 
 
 def call(exe, kz='Y', out=0, shstate=False, sp=0):
     cmd = f'{BIN_PATH}{exe}' if kz == "Y" else exe
-    if os.name != 'posix':
-        conf = subprocess.CREATE_NO_WINDOW
-    else:
-        if sp == 0:
-            cmd = cmd.split()
-        conf = 0
+    if sp == 0:
+        cmd = cmd.split()
+    conf = 0
     try:
         ret = subprocess.Popen(cmd, shell=shstate, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, creationflags=conf)
@@ -147,7 +123,7 @@ def get_dir_size(ddir, max_=1.06):
                 try:
                     size += os.path.getsize(os.path.join(root, name))
                 except:
-                    ...
+                    pass
     return int(size * max_)
 
 
@@ -273,7 +249,7 @@ def env_setup():
         '自定义UTC时间戳[live]': "UTC",
         '分段DAT/IMG支持个数[15]': "UNPACK_SPLIT_DAT"}
     while True:
-        os.system('cls' if os.name == 'nt' else "clear")
+        os.system("clear")
         print(f"\n> {GREEN}设置文件{CLOSE}: {SETUP_JSON.replace(PWD_DIR, '')}")
         i = 1
         data1 = {}
@@ -495,7 +471,7 @@ def patch_magisk(bootimg):
                             os.makedirs(
                                 V.main_dir + "system" + os.sep + "system" + os.sep + "data-app" + os.sep + "Magisk")
                         except:
-                            ...
+                            pass
                         else:
                             destination_path = os.path.join(V.main_dir, 'system', 'system', 'data-app',
                                                             'Magisk',
@@ -596,8 +572,8 @@ def repack_super():
                 for slot in ('_a', '_b', ''):
                     if os.path.isfile(os.path.join(V.out, i + slot + '.img')):
                         os.remove(os.path.join(V.out, i + slot + '.img'))
-    except (BaseException, Exception):
-        ...
+    except Exception:
+        pass
 
 
 def walk_contexts(contexts):
@@ -619,8 +595,6 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
     fspatch.main(source, fsconfig)
     walk_contexts(fsconfig)
     walk_contexts(contexts)
-    if os.name == 'nt':
-        source = source.replace("\\", '/')
     timestamp = int(time.time()) if V.SETUP_MANIFEST["UTC"].lower() == "live" else V.SETUP_MANIFEST["UTC"]
     read = "ro"
     resize2_rw = False
@@ -682,7 +656,7 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
             try:
                 os.remove(distance)
             except:
-                ...
+                pass
     elif int(V.SETUP_MANIFEST["ANDROID_SDK"]) <= 9:
         call(mkimage_cmd)
     else:
@@ -692,10 +666,10 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
                 try:
                     os.remove(distance)
                 except:
-                    ...
+                    pass
     if os.path.isfile(distance):
         print(" Done")
-        if resize2_rw and os.name == 'posix':
+        if resize2_rw:
             os.system(f"e2fsck -E unshare_blocks {distance}")
             if dumpinfo:
                 if int(os.path.getsize(distance)) > int(fsize):
@@ -748,7 +722,7 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
                 try:
                     os.remove(distance)
                 except:
-                    ...
+                    pass
             if os.path.isfile(distance.rsplit(".", 1)[0] + "_sparse.img"):
                 source_file = distance.rsplit(".", 1)[0] + "_sparse.img"
                 try:
@@ -777,15 +751,6 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
 
 def rmdire(path):
     if os.path.exists(path):
-        if os.name == 'nt':
-            for r, d, f in os.walk(path):
-                for i in d:
-                    if i.endswith('.'):
-                        call('mv {} {}'.format(os.path.join(r, i), os.path.join(r, i[:1])))
-                for i in f:
-                    if i.endswith('.'):
-                        call('mv {} {}'.format(os.path.join(r, i), os.path.join(r, i[:1])))
-
         try:
             shutil.rmtree(path)
         except PermissionError:
@@ -841,7 +806,7 @@ def dboot(infile, dist):
         except Exception as e:
             print("Ramdisk Not Found.. %s" % e)
             return
-        cpio = gettype.findfile("cpio.exe" if os.name != 'posix' else 'cpio',
+        cpio = gettype.findfile('cpio',
                                 BIN_PATH).replace(
             '\\', "/")
         call(exe="busybox ash -c \"find | sed 1d | %s -H newc -R 0:0 -o -F ../ramdisk-new.cpio\"" % cpio, sp=1,
@@ -859,8 +824,8 @@ def dboot(infile, dist):
                 print("Pack Ramdisk Successful..")
                 try:
                     os.remove("ramdisk.cpio")
-                except (Exception, BaseException):
-                    ...
+                except Exception:
+                    pass
                 os.rename("ramdisk-new.cpio.%s" % comp.split('_')[0], "ramdisk.cpio")
         else:
             print("Pack Ramdisk Successful..")
@@ -946,12 +911,12 @@ def decompress_img(source, distance, keep=1):
                         try:
                             os.rename(img, new_source)
                         except:
-                            ...
+                            pass
                         new_source = img.replace('_b.img', '.img')
                         try:
                             os.rename(img, new_source)
                         except:
-                            ...
+                            pass
                 j = input('> 是否继续分解img [0/1]: ') == 1
                 if j != 1:
                     return
@@ -1009,7 +974,7 @@ def decompress_dat(transfer, source, distance, keep=0):
                     try:
                         os.remove("{}.{}".format(source, i))
                     except:
-                        ...
+                        pass
 
     display(f"正在分解: {os.path.basename(source)} ...", 3)
     sdat2img.main(transfer, source, distance)
@@ -1045,7 +1010,7 @@ def decompress_bro(transfer, source, distance, keep=0):
 
 
 def decompress_bin(infile, outdir, flag='1'):
-    os.system("cls" if os.name == "nt" else "clear")
+    os.system("clear")
     if flag == "1":
         print(f"> {YELLOW}包含的所有镜像文件: {CLOSE}\n")
         payload_partitions = extract_payload.info(infile).split()
@@ -1087,7 +1052,7 @@ def decompress_win(infile_list):
             try:
                 os.remove(i)
             except:
-                ...
+                pass
     parts = list(set(parts))
     for i in parts:
         if not os.path.isdir(V.main_dir + os.path.basename(i).rsplit('.', 1)[0]):
@@ -1173,10 +1138,6 @@ def envelop_project():
     V.input = V.main_dir + after + "_input" + os.sep
     V.config = V.main_dir + after + "_config" + os.sep
     V.out = V.main_dir + after + "_out" + os.sep
-    if IS_ARM64:
-        V.input = ROM_DIR + "D.N.A" + os.sep + V.project + os.sep + after + "_input" + os.sep
-        V.out = ROM_DIR + "D.N.A" + os.sep + V.project + os.sep + after + "_out" + os.sep
-        V.config = ROM_DIR + "D.N.A" + os.sep + V.project + os.sep + after + "_config" + os.sep
     if not os.path.isdir(V.input):
         os.makedirs(V.input)
     if not os.path.isdir(V.out):
@@ -1215,8 +1176,7 @@ def extract_zrom(rom):
             fantasy_zip.extractall(sub_dir)
             fantasy_zip.close()
             if os.path.isfile(sub_dir + os.sep + 'run.sh'):
-                if os.name != 'nt':
-                    change_permissions_recursive(sub_dir, 0o777)
+                change_permissions_recursive(sub_dir, 0o777)
                 print('\x1b[1;31m\n 安装完成 !!!\x1b[0m')
             else:
                 rmdire(sub_dir)
@@ -1282,7 +1242,7 @@ def lists_project(dTitle, sPath, flag):
 
 
 def choose_zrom(flag=0):
-    os.system('cls' if os.name == 'nt' else 'clear')
+    os.system("clear")
     if flag == 1:
         print('\x1b[0;33m> 选择固件:\x1b[0m')
         s_file_path = askopenfilename(title='选择一个固件', filetypes=(("zip", "*.zip"),))
@@ -1305,7 +1265,7 @@ def choose_zrom(flag=0):
 
 
 def download_rom(rom, url):
-    os.system("cls" if os.name == "nt" else "clear")
+    os.system("clear")
     res = requests.get(url, stream=True)
     file_size = int(res.headers.get("Content-Length"))
     file_size_in_mb = int(file_size / 1048576)
@@ -1343,7 +1303,7 @@ def download_zrom():
 
 
 def creat_project():
-    os.system("cls" if os.name == "nt" else "clear")
+    os.system("clear")
     print("\x1b[1;31m> 新建工程:\x1b[0m\n")
     creat_name = input("  输入名称【不能有空格、特殊符号】: DNA_").strip().rstrip("\\").replace(" ", "_")
     if creat_name:
@@ -1363,7 +1323,7 @@ def creat_project():
 def menu_once():
     load_setup_json()
     while True:
-        os.system("cls" if os.name == "nt" else "clear")
+        os.system("clear")
         print("\x1b[0;33m> 工程列表\x1b[0m")
         lists_project("新建工程", "DNA_*", 0)
         choice = input("> 选择: ")
@@ -1372,7 +1332,7 @@ def menu_once():
         if int(choice) == 88:
             sys.exit()
         elif int(choice) == 33:
-            choose_zrom(int(os.name == "nt"))
+            choose_zrom(0)
         elif int(choice) == 44:
             if V.dict0:
                 which = input("> 输入序号进行删除: ")
@@ -1384,10 +1344,6 @@ def menu_once():
                                 f"\x1b[0;31m> 是否删除 \x1b[0;34mNo.{which} \x1b[0;31m工程: \x1b[0;32m{os.path.basename(V.dict0[int(which)])}\x1b[0;31m [0/1]:\x1b[0m ") == "1":
                             if os.path.isdir(V.dict0[int(which)]):
                                 rmdire(V.dict0[int(which)])
-                                if IS_ARM64:
-                                    if os.path.isdir(ROM_DIR + "D.N.A" + os.sep + V.dict0[int(which)]):
-                                        input(
-                                            f"> 请自主判断删除内置存储 {ROM_DIR + 'D.N.A' + os.sep + V.dict0[int(which)]}")
                                 menu_once()
                     input(f"> Number {which} Error !")
         elif int(choice) == 66:
@@ -1409,7 +1365,7 @@ def menu_once():
 
 def menu_more():
     while True:
-        os.system("cls" if os.name == "nt" else "clear")
+        os.system("clear")
         print(f"\x1b[1;36m> 当前工程: \x1b[0m{V.project}")
         print("-------------------------------------------------------\n")
         print("\x1b[0;31m  0> 返回上级    \x1b[0m")
@@ -1480,7 +1436,7 @@ def menu_more():
 
 def menu_modules():
     while True:
-        os.system("cls" if os.name == "nt" else "clear")
+        os.system("clear")
         print("\x1b[0;33m> 插件列表\x1b[0m")
         lists_project("返回上级", MOD_DIR + "DNA_*", 2)
         choice = input("> 选择: ")
@@ -1506,7 +1462,7 @@ def menu_modules():
         elif int(choice) == 0:
             return
         if 0 < int(choice) < len(V.dict0):
-            os.system("cls" if os.name == "nt" else "clear")
+            os.system("clear")
             print(f"\x1b[1;31m> 执行插件:\x1b[0m {os.path.basename(V.dict0[int(choice)])}\n")
             if os.path.isfile(shell_sub := (V.dict0[int(choice)] + os.sep + "run.sh")):
                 call(f"busybox bash {shell_sub} {V.main_dir.replace(os.sep, '/')}")
@@ -1531,7 +1487,7 @@ menu_actions = {
 
 def menu_main():
     V.JM = True
-    os.system('cls' if os.name == 'nt' else 'clear')
+    os.system("clear")
     print(f'\x1b[1;36m> 当前工程: \x1b[0m{V.project}')
     print('-------------------------------------------------------\n')
     print('\x1b[0;31m\t  0> 选择[etc]          1> 分解[bin]\x1b[0m\n')
