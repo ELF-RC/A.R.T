@@ -32,16 +32,20 @@ DNA_工程名/
 ├── OUT/                   # 最终输出区：合成的 img、new.dat、br、super.img、修补后的 boot 镜像
 └── WORKSPACE/             # 可编辑工作区
     ├── config/            # 分区 fsconfig、SELinux contexts、镜像信息等合成 metadata
-    ├── .tmp/              # 解包/转换的中间文件
     ├── system/
     ├── vendor/
     └── 其他分区目录/
 ```
 
-- `INPUT` 是只读输入区：工具不会主动删除、改名或覆盖其中的文件；所有中间文件写入 `WORKSPACE/.tmp/`
+- `INPUT` 是只读输入区：工具不会主动删除、改名或覆盖其中的文件；所有中间文件写入 `WORKSPACE`
 - 分区文件树与 `config` 均位于 `WORKSPACE/`，请勿手动删除 `WORKSPACE/config/` 中需要回包的 metadata
 - 最终合成产物输出到 `OUT/`
-- 旧版 `DNA_input`、`DNA_out`、`DNA_config` 及工程根分区目录结构不再支持，请新建工程并按上述目录放置/整理数据
+
+#### **构建**
+
+1.安装python3,pip
+2.pip install -r requirements.txt --break-system-packages (这里更推荐使用虚拟环境)
+3.执行./build.py构建
 
 #### **反馈**
 
