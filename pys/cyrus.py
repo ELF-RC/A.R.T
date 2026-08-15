@@ -1,6 +1,6 @@
-import fcntl
 import json
 import os
+import tempfile
 import platform
 import re
 import shlex
@@ -321,19 +321,9 @@ def workspace_partition(partition):
     return str(V.layout.partition_dir(partition))
 
 
-def stage_dir(category):
+def workspace_temp(category):
+    """Create a temporary directory inside WORKSPACE for intermediate files."""
     return str(V.layout.create_stage_dir(category)) + os.sep
-
-
-def stage_copy(source, category):
-    """Copy a source into WORKSPACE/.tmp so INPUT is never modified in place."""
-    source_path = Path(source)
-    if not source_path.is_file():
-        raise FileNotFoundError(source_path)
-    destination_dir = Path(stage_dir(category))
-    destination = destination_dir / source_path.name
-    shutil.copy2(source_path, destination)
-    return str(destination)
 
 
 def partition_metadata_names(partition):
@@ -380,340 +370,22 @@ def ensure_contexts_file(partition, config_dir):
 
 
 def create_partition_stage(partition, category, create_partition=True):
-    """Create an isolated extraction stage under WORKSPACE/.tmp."""
+    """Prepare WORKSPACE/<partition>/ and WORKSPACE/config/ for direct extraction."""
     partition = ProjectLayout.validate_component(partition, '分区')
-    root = Path(stage_dir(category))
-    partition_dir = root / partition
-    config_dir = root / 'config'
+    partition_dir = Path(workspace_partition(partition))
+    config_dir = Path(V.config)
+    config_dir.mkdir(parents=True, exist_ok=True)
+    if partition_dir.exists():
+        shutil.rmtree(partition_dir)
     if create_partition:
-        partition_dir.mkdir(parents=True, exist_ok=False)
-    config_dir.mkdir(parents=True, exist_ok=False)
-    return root, partition_dir, config_dir
-
-
-_COMMIT_JOURNAL_NAME = '.partition-commit.json'
-_COMMIT_LOCK_NAME = '.partition-commit.lock'
-
-
-def _fsync_file(path):
-    path = Path(path)
-    if path.is_symlink() or not path.is_file():
-        raise LayoutError(f'无法同步非普通文件: {path}')
-    flags = os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0)
-    try:
-        descriptor = os.open(path, flags)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-    except OSError as error:
-        raise LayoutError(f'无法同步文件 {path}: {error}') from error
-
-
-def _fsync_directory(path):
-    """Synchronize a directory or fail before a transaction is marked complete."""
-    path = Path(path)
-    if path.is_symlink() or not path.is_dir():
-        raise LayoutError(f'无法同步目录: {path}')
-    flags = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0) | getattr(os, 'O_CLOEXEC', 0)
-    try:
-        descriptor = os.open(path, flags)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-    except OSError as error:
-        raise LayoutError(f'无法同步目录 {path}: {error}') from error
-
-
-def _fsync_tree(root):
-    """Durably sync a staged partition tree without following Android symlinks."""
-    root = Path(root)
-    if root.is_symlink() or not root.is_dir():
-        raise LayoutError(f'无法同步分区目录: {root}')
-    directories = []
-    for current, dirs, files in os.walk(root, followlinks=False):
-        current_path = Path(current)
-        for filename in files:
-            candidate = current_path / filename
-            if candidate.is_symlink():
-                continue
-            if candidate.is_file():
-                _fsync_file(candidate)
-            else:
-                raise LayoutError(f'分区包含无法同步的条目: {candidate}')
-        directories.append(current_path)
-    for directory in reversed(directories):
-        _fsync_directory(directory)
-
-
-def _write_commit_journal(stage_root, journal):
-    journal_path = Path(stage_root) / _COMMIT_JOURNAL_NAME
-    temporary_path = journal_path.with_name(f'{journal_path.name}.{os.getpid()}.tmp')
-    with open(temporary_path, 'w', encoding='utf-8') as stream:
-        json.dump(journal, stream, ensure_ascii=False, sort_keys=True)
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary_path, journal_path)
-    _fsync_directory(stage_root)
-
-
-def _remove_commit_journal(stage_root):
-    journal_path = Path(stage_root) / _COMMIT_JOURNAL_NAME
-    if journal_path.exists() or journal_path.is_symlink():
-        if journal_path.is_symlink() or not journal_path.is_file():
-            raise LayoutError(f'提交日志无效: {journal_path}')
-        journal_path.unlink()
-        _fsync_directory(stage_root)
-
-
-@contextmanager
-def _partition_commit_lock():
-    lock_path = Path(V.tmp) / _COMMIT_LOCK_NAME
-    V.layout.require_workspace_path(lock_path)
-    if lock_path.is_symlink():
-        raise LayoutError(f'提交锁无效: {lock_path}')
-    flags = os.O_CREAT | os.O_RDWR | getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0)
-    try:
-        descriptor = os.open(lock_path, flags, 0o600)
-    except OSError as error:
-        raise LayoutError(f'无法创建提交锁: {lock_path}: {error}') from error
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        yield
-    finally:
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-        finally:
-            os.close(descriptor)
-
-
-def _load_commit_journal(stage_root):
-    journal_path = Path(stage_root) / _COMMIT_JOURNAL_NAME
-    if journal_path.is_symlink() or not journal_path.is_file():
-        raise LayoutError(f'提交日志无效: {journal_path}')
-    try:
-        with open(journal_path, 'r', encoding='utf-8') as stream:
-            journal = json.load(stream)
-    except (OSError, json.JSONDecodeError) as error:
-        raise LayoutError(f'无法读取提交日志: {journal_path}: {error}') from error
-    if not isinstance(journal, dict) or journal.get('version') != 1:
-        raise LayoutError(f'提交日志格式无效: {journal_path}')
-    return journal
-
-
-def _recover_partition_stage(stage_root, journal):
-    """Restore an interrupted commit, or finalize one durably marked complete."""
-    stage_root = Path(stage_root)
-    partition = ProjectLayout.validate_component(journal.get('partition'), '分区')
-    staged_partition = stage_root / partition
-    staged_config = stage_root / 'config'
-    old_partition = stage_root / '.previous-partition'
-    old_metadata = stage_root / '.previous-metadata'
-    target_partition = V.layout.partition_dir(partition)
-    canonical_config = Path(V.config)
-    metadata_names = tuple(journal.get('metadata_files', ()))
-    old_metadata_names = tuple(journal.get('old_metadata_names', ()))
-    known_names = set(partition_metadata_names(partition))
-    if not set(metadata_names).issubset(known_names) or not set(old_metadata_names).issubset(known_names):
-        raise LayoutError(f'提交日志包含未知 metadata: {stage_root}')
-    if staged_config.is_symlink() or not staged_config.is_dir():
-        raise LayoutError(f'提交 metadata 暂存目录无效: {staged_config}')
-
-    # The committed marker is written only after every promotion and directory
-    # fsync has completed. Its leftover journal can be removed without rolling
-    # a successful publication back.
-    if journal.get('phase') == 'committed':
-        _remove_commit_journal(stage_root)
-        return
-
-    # A promoted metadata file is absent from staging. Move it back first so
-    # old metadata can be restored without losing the new stage.
-    for name in metadata_names:
-        staged = staged_config / name
-        canonical = canonical_config / name
-        if not (staged.exists() or staged.is_symlink()) and (canonical.exists() or canonical.is_symlink()):
-            if canonical.is_symlink() or not canonical.is_file():
-                raise LayoutError(f'无法恢复 metadata: {canonical}')
-            os.replace(canonical, staged)
-
-    staged_exists = staged_partition.exists() or staged_partition.is_symlink()
-    target_exists = target_partition.exists() or target_partition.is_symlink()
-    old_exists = old_partition.exists() or old_partition.is_symlink()
-    if staged_partition.is_symlink() or target_partition.is_symlink() or old_partition.is_symlink():
-        raise LayoutError(f'恢复分区包含符号链接: {partition}')
-
-    if old_exists:
-        if not old_partition.is_dir():
-            raise LayoutError(f'无法恢复旧分区: {old_partition}')
-        if target_exists:
-            if not target_partition.is_dir():
-                raise LayoutError(f'无法恢复当前分区: {target_partition}')
-            if staged_exists:
-                raise LayoutError(f'恢复目标已存在: {staged_partition}')
-            os.replace(target_partition, staged_partition)
-        os.replace(old_partition, target_partition)
-    elif target_exists and not staged_exists:
-        # There was no original partition, and the new tree had already been
-        # promoted when interruption occurred.
-        if not target_partition.is_dir():
-            raise LayoutError(f'无法恢复当前分区: {target_partition}')
-        os.replace(target_partition, staged_partition)
-    elif target_exists and staged_exists:
-        # The journal was written but no partition move had happened yet.
-        if not (target_partition.is_dir() and staged_partition.is_dir()):
-            raise LayoutError(f'提交分区状态无效: {partition}')
-
-    for name in old_metadata_names:
-        backup = old_metadata / name
-        canonical = canonical_config / name
-        if backup.exists() or backup.is_symlink():
-            if backup.is_symlink() or not backup.is_file():
-                raise LayoutError(f'无法恢复旧 metadata: {backup}')
-            os.replace(backup, canonical)
-
-    _fsync_directory(V.layout.workspace_dir)
-    _fsync_directory(canonical_config)
-    _remove_commit_journal(stage_root)
-
-
-def _recover_pending_partition_commits_locked():
-    tmp_dir = Path(V.tmp)
-    for stage_root in tmp_dir.iterdir():
-        if stage_root.name in {_COMMIT_LOCK_NAME} or stage_root.is_symlink() or not stage_root.is_dir():
-            continue
-        journal_path = stage_root / _COMMIT_JOURNAL_NAME
-        if journal_path.exists() or journal_path.is_symlink():
-            _recover_partition_stage(stage_root, _load_commit_journal(stage_root))
-
-
-def recover_pending_partition_commits():
-    """Recover interrupted partition commits before writing into WORKSPACE."""
-    with _partition_commit_lock():
-        _recover_pending_partition_commits_locked()
-
-
-def commit_partition_stage(partition, stage_root, required_metadata, preserve_existing_metadata=False):
-    """Publish a validated partition stage under a project-wide commit lock.
-
-    Every mutable step is recorded in a journal retained inside the stage. A
-    later project open or commit rolls the stage back if this process is
-    interrupted, preserving either the previous complete tree or the staged
-    tree rather than a mixed WORKSPACE/config state.
-    """
-    partition = ProjectLayout.validate_component(partition, '分区')
-    stage_root = Path(stage_root)
-    if not V.layout.is_within_tmp(stage_root) or stage_root.is_symlink() or not stage_root.is_dir():
-        raise LayoutError(f'临时分区目录无效: {stage_root}')
-    if os.stat(stage_root).st_dev != os.stat(V.layout.workspace_dir).st_dev:
-        raise LayoutError('临时分区目录必须与 WORKSPACE 位于同一文件系统。')
-
-    staged_partition = stage_root / partition
-    staged_config = stage_root / 'config'
-    if staged_partition.is_symlink() or not staged_partition.is_dir():
-        raise LayoutError(f'{partition} 分区工作目录不存在: {staged_partition}')
-    if staged_config.is_symlink() or not staged_config.is_dir():
-        raise LayoutError(f'{partition} metadata 工作目录不存在: {staged_config}')
-
-    target_partition = V.layout.partition_dir(partition)
-    canonical_config = Path(V.config)
-    if canonical_config.is_symlink() or not canonical_config.is_dir():
-        raise LayoutError(f'工程 metadata 目录无效: {canonical_config}')
-    V.layout.require_workspace_path(canonical_config)
-
-    metadata_files = []
-    for name in partition_metadata_names(partition):
-        candidate = staged_config / name
-        if candidate.is_symlink():
-            raise LayoutError(f'{partition} metadata 不能是符号链接: {candidate}')
-        if candidate.exists():
-            if not candidate.is_file():
-                raise LayoutError(f'{partition} metadata 不是普通文件: {candidate}')
-            metadata_files.append(name)
-
-    required = set(required_metadata)
-    available = set(metadata_files)
-    if not required.issubset(available):
-        missing = ', '.join(sorted(required - available))
-        raise LayoutError(f'{partition} 缺少必要 metadata: {missing}')
-
-    _fsync_tree(staged_partition)
-    for name in metadata_files:
-        _fsync_file(staged_config / name)
-    _fsync_directory(staged_config)
-    _fsync_directory(stage_root)
-
-    with _partition_commit_lock():
-        _recover_pending_partition_commits_locked()
-        if target_partition.exists() or target_partition.is_symlink():
-            if target_partition.is_symlink() or not target_partition.is_dir():
-                raise LayoutError(f'现有分区目录无效: {target_partition}')
-
-        old_metadata_names = []
-        for name in partition_metadata_names(partition):
-            canonical = canonical_config / name
-            if not (canonical.exists() or canonical.is_symlink()):
-                continue
-            if canonical.is_symlink() or not canonical.is_file():
-                raise LayoutError(f'现有 metadata 无效: {canonical}')
-            if preserve_existing_metadata and name not in available:
-                continue
-            old_metadata_names.append(name)
-
-        old_partition = stage_root / '.previous-partition'
-        old_metadata = stage_root / '.previous-metadata'
-        if old_partition.exists() or old_partition.is_symlink() or old_metadata.exists() or old_metadata.is_symlink():
-            raise LayoutError(f'临时分区目录包含保留提交项: {stage_root}')
-        old_metadata.mkdir()
-        journal = {
-            'version': 1,
-            'partition': partition,
-            'metadata_files': metadata_files,
-            'old_metadata_names': old_metadata_names,
-            'preserve_existing_metadata': bool(preserve_existing_metadata),
-            'phase': 'prepared',
-        }
-        _write_commit_journal(stage_root, journal)
-        try:
-            if target_partition.exists():
-                os.replace(target_partition, old_partition)
-            journal['phase'] = 'old_partition_moved'
-            _write_commit_journal(stage_root, journal)
-
-            for name in old_metadata_names:
-                os.replace(canonical_config / name, old_metadata / name)
-            journal['phase'] = 'old_metadata_moved'
-            _write_commit_journal(stage_root, journal)
-
-            os.replace(staged_partition, target_partition)
-            journal['phase'] = 'partition_promoted'
-            _write_commit_journal(stage_root, journal)
-
-            promoted_metadata = []
-            for name in metadata_files:
-                os.replace(staged_config / name, canonical_config / name)
-                promoted_metadata.append(name)
-                journal['promoted_metadata'] = promoted_metadata
-                _write_commit_journal(stage_root, journal)
-
-            _fsync_directory(V.layout.workspace_dir)
-            _fsync_directory(canonical_config)
-            journal['phase'] = 'committed'
-            _write_commit_journal(stage_root, journal)
-            _remove_commit_journal(stage_root)
-        except BaseException:
-            try:
-                _recover_partition_stage(stage_root, _load_commit_journal(stage_root))
-            except BaseException:
-                # Keep the journal for deterministic recovery on the next open.
-                pass
-            raise
+        partition_dir.mkdir(parents=True, exist_ok=True)
+    return partition_dir.parent, partition_dir, config_dir
 
 
 def workspace_relative_path(relative_path):
     """Resolve a configured relative path and keep it inside editable partitions."""
     relative = Path(relative_path)
-    if relative.parts and relative.parts[0] in {'config', '.tmp'}:
+    if relative.parts and relative.parts[0] in {'config'}:
         raise LayoutError(f"不允许修改 WORKSPACE/{relative.parts[0]}")
     return V.layout.require_workspace_path(Path(V.workspace, relative))
 
@@ -762,10 +434,9 @@ def patch_kernel(boot):
 
 
 def _prepare_boot_work():
-    """Create a disposable boot work directory inside WORKSPACE/.tmp."""
-    if os.path.isdir(V.boot_work):
-        shutil.rmtree(V.boot_work)
-    os.makedirs(V.boot_work, exist_ok=True)
+    """Create a disposable boot work directory in system temp."""
+    boot_work = tempfile.mkdtemp(prefix='art-bootimg-')
+    V.boot_work = boot_work + os.sep
     return V.boot_work
 
 
@@ -1010,7 +681,7 @@ def _super_partitions_in_out():
 
 
 def _stage_super_image(source, stage):
-    """Copy one OUT image to .tmp before sparse conversion for lpmake."""
+    """Copy one OUT image to WORKSPACE temp dir before sparse conversion for lpmake."""
     staged = os.path.join(stage, os.path.basename(source))
     shutil.copy2(source, staged)
     if gettype.gettype(staged) != 'sparse':
@@ -1027,7 +698,7 @@ def repack_super():
         input('> 未发现 OUT 文件夹下可用于合成 super 的镜像文件')
         return
 
-    stage = stage_dir('super-repack')
+    stage = workspace_temp('super-repack')
     stage_output = os.path.join(stage, 'super.img')
     group_name = V.SETUP_MANIFEST['GROUP_NAME']
     super_size = V.SETUP_MANIFEST['SUPER_SIZE']
@@ -1103,6 +774,7 @@ def repack_super():
 
     os.makedirs(V.out, exist_ok=True)
     os.replace(stage_output, os.path.join(V.out, 'super.img'))
+    shutil.rmtree(stage, ignore_errors=True)
     print(f'> super.img 已输出到 {V.out}')
 
 
@@ -1165,6 +837,9 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
         mkerofs_cmd = ['mkfs.erofs']
         if V.SETUP_MANIFEST.get("EROFS_OLD_KERNEL", "0") == "1":
             mkerofs_cmd.extend(['-E', 'legacy-compress'])
+        new_distance = V.out + label + "_new.img"
+        if os.path.isfile(new_distance):
+            os.remove(new_distance)
         mkerofs_cmd.extend([
             f'-z{erofs_compress}',
             '-T', str(timestamp),
@@ -1172,7 +847,7 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
             f'--product-out={V.workspace}',
             f'--fs-config-file={fsconfig}',
             f'--file-contexts={contexts}',
-            distance,
+            new_distance,
             source,
         ])
     printinform = f"Size:{size}|FsT:{fs_variant}|FsR:{read}|Sparse:{V.SETUP_MANIFEST['REPACK_SPARSE_IMG']}"
@@ -1191,11 +866,22 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
     if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "1":
         if call(mkerofs_cmd) != 0:
             try:
-                os.remove(distance)
+                os.remove(new_distance)
             except:
                 pass
-        else:
+        if os.path.isfile(new_distance):
             print(" Done")
+            if V.SETUP_MANIFEST['REPACK_SPARSE_IMG'] == '1' or flag > 8:
+                display("开始转换: sparse format ...")
+                call(['img2simg', new_distance, distance])
+                try:
+                    os.remove(new_distance)
+                except:
+                    pass
+            else:
+                if os.path.isfile(distance):
+                    os.remove(distance)
+                os.rename(new_distance, distance)
     else:
         call(mke2fs_a_cmd)
         if os.path.isfile(new_distance):
@@ -1391,11 +1077,8 @@ def boot_utils(source, distance, flag=1):
 
 
 def _stage_work_source(source, category):
-    """Return a writable copy unless the source already belongs to WORKSPACE/.tmp."""
-    source = str(Path(source).resolve())
-    if V.layout.is_within_tmp(source):
-        return source
-    return stage_copy(source, category)
+    """Return the source path directly; INPUT is read but never modified."""
+    return str(Path(source).resolve())
 
 
 def _destination_partition(distance, source):
@@ -1434,33 +1117,28 @@ def _super_images_to_process(super_dir):
 
 
 def _canonical_stage_source(source, partition, stage_root):
-    """Keep extractor-derived metadata names aligned with the target partition."""
-    try:
-        if Path(source).suffix == '.img' and partition_name(source) == partition:
-            return source
-    except LayoutError:
-        pass
-    staged_source = Path(stage_root) / f'{partition}.img'
-    shutil.copy2(source, staged_source)
-    return str(staged_source)
+    """Return source directly; metadata names are aligned by partition name."""
+    return str(Path(source).resolve())
 
 
 def _commit_extracted_partition(partition, stage_root, required_metadata, preserve_existing_metadata=False):
-    try:
-        commit_partition_stage(
-            partition,
-            stage_root,
-            required_metadata,
-            preserve_existing_metadata=preserve_existing_metadata,
-        )
-    except (LayoutError, OSError) as error:
-        print(f'> {partition} 分解结果未提交，临时现场已保留: {error}')
+    """Direct extraction mode: files are already in WORKSPACE, just verify metadata."""
+    config_dir = Path(V.config)
+    required = set(required_metadata)
+    available = set()
+    for name in partition_metadata_names(partition):
+        candidate = config_dir / name
+        if candidate.exists() and candidate.is_file():
+            available.add(name)
+    if not required.issubset(available):
+        missing = ', '.join(sorted(required - available))
+        print(f'> {partition} 缺少必要 metadata: {missing}')
         return False
     return True
 
 
 def decompress_img(source, distance=None, keep=1):
-    """Extract one image through WORKSPACE/.tmp before replacing a partition."""
+    """Extract one image directly into WORKSPACE/<partition>/."""
     del keep
     source_type = gettype.gettype(source)
     if source_type not in ('boot', 'vendor_boot', 'sparse', 'ext', 'erofs', 'super'):
@@ -1483,34 +1161,19 @@ def decompress_img(source, distance=None, keep=1):
 
     if file_type in ('boot', 'vendor_boot'):
         try:
-            stage_root, staged_partition, staged_config = create_partition_stage(partition, 'boot-extract')
+            _, staged_partition, staged_config = create_partition_stage(partition, 'boot-extract')
             if not boot_utils(working_source, str(staged_partition)):
                 raise LayoutError(f'{partition} boot 解包失败')
             if not (staged_partition / 'boot_o.img').is_file():
                 raise LayoutError(f'{partition} boot 解包未生成 boot_o.img')
             metadata_path(staged_config, partition, '_kernel.txt').touch()
             committed = _commit_extracted_partition(
-                partition, stage_root, {f'{partition}_kernel.txt'})
+                partition, staged_partition, {f'{partition}_kernel.txt'})
         except (LayoutError, OSError) as error:
-            print(f'> {partition} boot 分解失败，临时现场已保留: {error}')
+            print(f'> {partition} boot 分解失败: {error}')
     elif file_type == 'sparse':
         display(f'正在转换: Unsparse Format [{os.path.basename(working_source)}] ...')
-        try:
-            source_is_canonical = (
-                Path(working_source).suffix == '.img'
-                and partition_name(working_source) == partition
-            )
-        except LayoutError:
-            source_is_canonical = False
-        if source_is_canonical:
-            sparse_source = working_source
-        else:
-            sparse_source = _canonical_stage_source(
-                working_source,
-                partition,
-                Path(stage_dir('sparse')),
-            )
-        raw_source = imgextractor.ULTRAMAN().APPLE(sparse_source)
+        raw_source = imgextractor.ULTRAMAN().APPLE(working_source)
         if raw_source and os.path.isfile(raw_source):
             decompress_img(raw_source, destination)
         else:
@@ -1518,14 +1181,13 @@ def decompress_img(source, distance=None, keep=1):
         return
     elif file_type == 'ext':
         try:
-            stage_root, staged_partition, staged_config = create_partition_stage(partition, 'ext-extract')
-            extractor_source = _canonical_stage_source(working_source, partition, stage_root)
+            _, staged_partition, staged_config = create_partition_stage(partition, 'ext-extract')
             with Console().status(f"[yellow]正在提取{os.path.basename(working_source)}[/]"):
-                imgextractor.ULTRAMAN().MONSTER(extractor_source, str(staged_partition))
+                imgextractor.ULTRAMAN().MONSTER(working_source, str(staged_partition))
             ensure_contexts_file(partition, staged_config)
             committed = _commit_extracted_partition(
                 partition,
-                stage_root,
+                staged_partition,
                 {
                     f'{partition}_contexts.txt',
                     f'{partition}_fsconfig.txt',
@@ -1533,35 +1195,35 @@ def decompress_img(source, distance=None, keep=1):
                 },
             )
         except Exception as error:
-            print(f'> EXT4 分解失败，临时现场已保留: {error}')
+            print(f'> EXT4 分解失败: {error}')
     elif file_type == 'erofs':
         display(f'正在分解: {os.path.basename(working_source)} <{file_type}>', 3)
         try:
-            stage_root, staged_partition, staged_config = create_partition_stage(
-                partition,
-                'erofs-extract',
-                create_partition=False,
-            )
-            extractor_source = _canonical_stage_source(working_source, partition, stage_root)
+            staged_partition = Path(destination)
+            staged_config = Path(V.config)
+            staged_config.mkdir(parents=True, exist_ok=True)
             with open(metadata_path(staged_config, partition, '_size.txt'), 'w', encoding='utf-8') as size_file:
-                size_file.write(str(os.path.getsize(extractor_source)))
-            if call(['extract.erofs', '-i', extractor_source, '-o', str(stage_root), '-x']) != 0:
-                print('> EROFS 分解失败，临时现场已保留')
-            elif normalize_erofs_metadata(partition, staged_config):
-                committed = _commit_extracted_partition(
-                    partition,
-                    stage_root,
-                    {
-                        f'{partition}_contexts.txt',
-                        f'{partition}_fsconfig.txt',
-                        f'{partition}_size.txt',
-                    },
-                )
+                size_file.write(str(os.path.getsize(working_source)))
+            # Extract directly to WORKSPACE/ — extract.erofs creates WORKSPACE/<partition>/ and writes metadata to WORKSPACE/config/
+            if call(['extract.erofs', '-i', working_source, '-o', V.workspace, '-x']) != 0:
+                print('> EROFS 分解失败')
+            else:
+                # Metadata files land in WORKSPACE/config/ with {partition}_* names already
+                if normalize_erofs_metadata(partition, staged_config):
+                    committed = _commit_extracted_partition(
+                        partition,
+                        staged_partition,
+                        {
+                            f'{partition}_contexts.txt',
+                            f'{partition}_fsconfig.txt',
+                            f'{partition}_size.txt',
+                        },
+                    )
         except (LayoutError, OSError) as error:
-            print(f'> EROFS 分解失败，临时现场已保留: {error}')
+            print(f'> EROFS 分解失败: {error}')
     elif file_type == 'super':
         display(f'正在分解: {os.path.basename(working_source)} <{file_type}>', 3)
-        super_dir = stage_dir('super')
+        super_dir = workspace_temp('super')
         try:
             lpunpack.unpack(working_source, super_dir)
         except (Exception, SystemExit) as error:
@@ -1571,6 +1233,7 @@ def decompress_img(source, distance=None, keep=1):
             return
         for image, image_partition in _super_images_to_process(super_dir):
             decompress_img(image, workspace_partition(image_partition))
+        shutil.rmtree(super_dir, ignore_errors=True)
         return
 
     if committed:
@@ -1604,66 +1267,85 @@ def _numbered_fragments(source):
     return [fragments[index] for index in sorted(fragments)]
 
 
-def _stage_split_bundle(source, category):
-    """Copy and combine input split files only inside WORKSPACE/.tmp."""
+def _combine_fragments(source):
+    """Combine numbered fragments into a single file in WORKSPACE root, return the path."""
     source_path = Path(source)
     fragments = _numbered_fragments(source_path)
-    stage = Path(stage_dir(category))
-    staged_source = stage / source_path.name
+    if not fragments:
+        return str(source)
+    dest = Path(V.workspace) / source_path.name
     sources = [source_path, *fragments]
-    with open(staged_source, 'xb') as destination_file:
+    with open(dest, 'xb') as destination_file:
         for index, fragment in enumerate(sources):
             if index:
                 display(f'合并: {fragment.name} ...')
             with open(fragment, 'rb') as source_file:
                 shutil.copyfileobj(source_file, destination_file, length=1024 * 1024)
-    return str(staged_source)
+    return str(dest)
 
 
 def decompress_dat(transfer, source, distance=None, keep=0):
-    """Convert a complete DAT bundle in .tmp, then extract its raw image."""
+    """Convert DAT directly: read transfer.list + dat from INPUT, extract to partition."""
     del distance, keep
     if not transfer or not os.path.isfile(transfer):
         print(f'> 未找到 {os.path.basename(source).split(".")[0]}.transfer.list')
         return
 
+    combined = None
+    raw_image = None
     try:
         s_time = time.time()
-        staged_source = _stage_split_bundle(source, 'dat')
-        partition = partition_name(staged_source)
-        raw_image = os.path.join(os.path.dirname(staged_source), f'{partition}.img')
-        display(f"正在分解: {os.path.basename(staged_source)} ...", 3)
-        sdat2img.main(transfer, staged_source, raw_image)
+        partition = partition_name(source)
+        combined = _combine_fragments(source)
+        raw_image = os.path.join(V.workspace, f'{partition}.img')
+        display(f"正在分解: {os.path.basename(combined)} ...", 3)
+        sdat2img.main(transfer, combined, raw_image)
         if not os.path.isfile(raw_image):
             raise sdat2img.SdatError('未生成 raw image')
         print("\x1b[1;32m [%ds]\x1b[0m" % (time.time() - s_time))
         decompress_img(raw_image, workspace_partition(partition))
     except (LayoutError, OSError, ValueError, sdat2img.SdatError) as error:
-        print(f'> DAT 分解失败，临时现场已保留: {error}')
+        print(f'> DAT 分解失败: {error}')
+    finally:
+        for f in (combined, raw_image):
+            if f and f != source and os.path.isfile(f):
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
 
 
 def decompress_bro(transfer, source, distance=None, keep=0):
-    """Combine BR fragments in .tmp, decompress, then run the DAT pipeline."""
+    """Decompress BR directly from INPUT, then run DAT pipeline."""
     del distance, keep
     if not transfer or not os.path.isfile(transfer):
         print(f'> 未找到 {os.path.basename(source).split(".")[0]}.transfer.list')
         return
 
+    combined = None
+    staged_dat = None
     try:
         s_time = time.time()
-        staged_source = _stage_split_bundle(source, 'brotli')
-        if not staged_source.endswith('.br'):
-            raise LayoutError(f'BROTLI 文件扩展名无效: {staged_source}')
-        staged_dat = staged_source[:-3]
+        combined = _combine_fragments(source)
+        if not combined.endswith('.br'):
+            raise LayoutError(f'BROTLI 文件扩展名无效: {combined}')
+        staged_dat = combined[:-3]
         display(f"正在分解: {os.path.basename(source)} ...", 3)
-        if call(['brotli', '-df', staged_source, '-o', staged_dat]) != 0:
+        if call(['brotli', '-df', combined, '-o', staged_dat]) != 0:
             raise LayoutError('brotli 解压失败')
         if not os.path.isfile(staged_dat):
             raise LayoutError('brotli 未生成 new.dat')
         print("\x1b[1;32m [%ds]\x1b[0m" % (time.time() - s_time))
         decompress_dat(transfer, staged_dat)
     except (LayoutError, OSError) as error:
-        print(f'> BROTLI 分解失败，临时现场已保留: {error}')
+        print(f'> BROTLI 分解失败: {error}')
+    finally:
+        for f in (combined, staged_dat):
+            if f and f != source and os.path.isfile(f):
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
 
 
 def _decompress_payload_images(payload, payload_dir, mode):
@@ -1687,15 +1369,19 @@ def _decompress_payload_images(payload, payload_dir, mode):
 
 
 def decompress_bin(infile, outdir=None, flag='1'):
-    """Extract payload images to WORKSPACE/.tmp; INPUT remains untouched."""
+    """Extract payload images directly to WORKSPACE."""
     del outdir
     os.system("clear")
+    payload_dir = os.path.join(V.workspace, '.payload-images')
     try:
         payload = _stage_work_source(infile, 'payload')
-        payload_dir = stage_dir('payload-images')
+        os.makedirs(payload_dir, exist_ok=True)
         _decompress_payload_images(payload, payload_dir, flag)
     except (LayoutError, OSError, AssertionError) as error:
         print(f'> Payload 分解失败: {error}')
+    finally:
+        if os.path.isdir(payload_dir):
+            shutil.rmtree(payload_dir, ignore_errors=True)
 
 
 def appendf(msg, log):
@@ -1737,8 +1423,7 @@ def decompress_win(infile_list):
                 print(f'> 跳过 {source}: {error}')
 
     for partition, fragments in groups.items():
-        stage = stage_dir('win')
-        staged_win = os.path.join(stage, f'{partition}.win')
+        staged_win = os.path.join(V.workspace, f'{partition}.win')
         fragments.sort(key=lambda item: (not item.endswith('.win'), os.path.basename(item)))
         with open(staged_win, 'wb') as destination_file:
             for fragment in fragments:
@@ -1746,21 +1431,21 @@ def decompress_win(infile_list):
                 with open(fragment, 'rb') as source_file:
                     shutil.copyfileobj(source_file, destination_file)
 
-        if gettype.gettype(staged_win) in ['erofs', 'ext', 'sparse', 'super', 'boot', 'vendor_boot']:
-            decompress_img(staged_win, workspace_partition(partition))
-        elif tarfile.is_tarfile(staged_win):
-            try:
-                stage_root, staged_partition, _ = create_partition_stage(partition, 'tar-extract')
+        try:
+            if gettype.gettype(staged_win) in ['erofs', 'ext', 'sparse', 'super', 'boot', 'vendor_boot']:
+                decompress_img(staged_win, workspace_partition(partition))
+            elif tarfile.is_tarfile(staged_win):
+                _, staged_partition, _ = create_partition_stage(partition, 'tar-extract')
                 with tarfile.open(staged_win, 'r') as archive:
                     safe_extract_tar(archive, staged_partition)
-                if not _commit_extracted_partition(partition, stage_root, set()):
+                if not _commit_extracted_partition(partition, staged_partition, set()):
                     continue
                 print(f'> {partition} TAR 分解完成')
-            except (LayoutError, OSError, tarfile.TarError) as error:
-                print(f'> TAR 分解失败，临时现场已保留: {error}')
-                continue
-        else:
-            input("未知格式")
+            else:
+                input("未知格式")
+        finally:
+            if os.path.isfile(staged_win):
+                os.remove(staged_win)
 
 
 def decompress(infile, flag=4):
@@ -1806,9 +1491,6 @@ def envelop_project():
     V.out = str(V.layout.out_dir) + os.sep
     V.workspace = str(V.layout.workspace_dir) + os.sep
     V.config = str(V.layout.config_dir) + os.sep
-    V.tmp = str(V.layout.tmp_dir) + os.sep
-    V.boot_work = str(V.layout.tmp_dir / 'bootimg') + os.sep
-    recover_pending_partition_commits()
 
 
 def safe_extract_zip(archive, destination):
@@ -1873,8 +1555,8 @@ def extract_zrom(rom):
             input(f'> 无法创建或打开工程: {error}')
             return
 
-        import_dir = stage_dir('import')
-        print(f'> 解压缩: {os.path.basename(rom)} 到 WORKSPACE/.tmp')
+        import_dir = workspace_temp('import')
+        print(f'> 解压缩: {os.path.basename(rom)} 到 WORKSPACE')
         try:
             safe_extract_zip(archive, import_dir)
         except LayoutError as error:
@@ -1887,6 +1569,7 @@ def extract_zrom(rom):
             payload_files[0],
             flag=input(f'> {RED}选择提取方式:  [0]全盘提取  [1]指定镜像{CLOSE} >> '),
         )
+        shutil.rmtree(import_dir, ignore_errors=True)
         menu_main()
         return
 
@@ -1898,11 +1581,13 @@ def extract_zrom(rom):
         infile, able = _find_imported_files(import_dir, '*.img'), 4
     else:
         input('> 仅支持含有payload.bin/*.new.dat/*.new.dat.br/*.img的zip固件')
+        shutil.rmtree(import_dir, ignore_errors=True)
         menu_main()
         return
 
     quiet()
     decompress(infile, able)
+    shutil.rmtree(import_dir, ignore_errors=True)
     menu_main()
 
 

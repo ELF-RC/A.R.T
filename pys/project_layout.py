@@ -19,7 +19,7 @@ class UnsupportedLayoutError(LayoutError):
 
 _SAFE_COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 _ROOT_DIRS = frozenset({"INPUT", "OUT", "WORKSPACE"})
-_RESERVED_WORKSPACE_NAMES = frozenset({"config", ".tmp", "INPUT", "OUT", "WORKSPACE"})
+_RESERVED_WORKSPACE_NAMES = frozenset({"config", "INPUT", "OUT", "WORKSPACE"})
 
 
 @dataclass(frozen=True)
@@ -56,17 +56,12 @@ class ProjectLayout:
         return self.workspace_dir / "config"
 
     @property
-    def tmp_dir(self) -> Path:
-        return self.workspace_dir / ".tmp"
-
-    @property
     def required_dirs(self) -> tuple[Path, ...]:
         return (
             self.input_dir,
             self.out_dir,
             self.workspace_dir,
             self.config_dir,
-            self.tmp_dir,
         )
 
     @staticmethod
@@ -153,49 +148,27 @@ class ProjectLayout:
         if path.is_symlink() or (path.exists() and not path.is_dir()):
             raise LayoutError(f"分区目录无效: {path}")
         resolved = self.require_workspace_path(path)
-        for protected in (self.workspace_dir.resolve(), self.config_dir.resolve(), self.tmp_dir.resolve()):
+        for protected in (self.workspace_dir.resolve(), self.config_dir.resolve()):
             if resolved == protected:
                 raise LayoutError(f"分区目录指向受保护路径: {path}")
         return path
 
     def create_stage_dir(self, category: str) -> Path:
-        category = self.validate_component(category, "临时任务")
+        """Create a temporary directory inside WORKSPACE for multi-step pipelines."""
+        self.validate_component(category, "临时任务")
         state = self.state()
         if state == "unsupported":
             raise UnsupportedLayoutError("工程目录结构不受支持，不能创建临时任务目录。")
         if state != "new":
             raise LayoutError("工程目录尚未完成初始化，不能创建临时任务目录。")
         self._require_safe_workspace()
-        if any(path.is_symlink() or not path.is_dir() for path in self.required_dirs):
-            raise LayoutError("工程目录尚未完成初始化，不能创建临时任务目录。")
-        if self.tmp_dir.is_symlink() or (self.tmp_dir.exists() and not self.tmp_dir.is_dir()):
-            raise LayoutError(f"临时目录无效: {self.tmp_dir}")
-        self.tmp_dir.mkdir(parents=True, exist_ok=True)
-        if not self._is_safe_directory(self.tmp_dir, self.project_dir):
-            raise LayoutError(f"临时目录无效: {self.tmp_dir}")
-        workspace_device = os.stat(self.workspace_dir).st_dev
-        if os.stat(self.tmp_dir).st_dev != workspace_device:
-            raise LayoutError("WORKSPACE/.tmp 必须与 WORKSPACE 位于同一文件系统。")
-        if self.config_dir.is_symlink() or not self.config_dir.is_dir():
-            raise LayoutError(f"metadata 目录无效: {self.config_dir}")
-        if os.stat(self.config_dir).st_dev != workspace_device:
-            raise LayoutError("WORKSPACE/config 必须与 WORKSPACE 位于同一文件系统。")
-        return Path(tempfile.mkdtemp(prefix=f"{category}-", dir=self.tmp_dir))
+        return Path(tempfile.mkdtemp(prefix=f".{category}-", dir=self.workspace_dir))
 
     def is_within_workspace(self, path: str | os.PathLike[str]) -> bool:
         if not self._is_safe_directory(self.workspace_dir, self.project_dir):
             return False
         try:
             Path(path).resolve().relative_to(self.workspace_dir.resolve())
-            return True
-        except ValueError:
-            return False
-
-    def is_within_tmp(self, path: str | os.PathLike[str]) -> bool:
-        if not self._is_safe_directory(self.tmp_dir, self.project_dir):
-            return False
-        try:
-            Path(path).resolve().relative_to(self.tmp_dir.resolve())
             return True
         except ValueError:
             return False
