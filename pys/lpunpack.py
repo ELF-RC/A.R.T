@@ -5,6 +5,7 @@ import enum
 import io
 import json
 import os
+import re
 import struct
 import sys
 from dataclasses import dataclass, field
@@ -594,6 +595,15 @@ class LpUnpackError(Exception):
         return self.message
 
 
+_SAFE_PARTITION_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*\Z')
+
+
+def validate_partition_name(name):
+    if not isinstance(name, str) or not _SAFE_PARTITION_NAME.fullmatch(name):
+        raise LpUnpackError(f'Invalid logical partition name: {name!r}')
+    return name
+
+
 @dataclass
 class UnpackJob:
     name: str
@@ -603,64 +613,118 @@ class UnpackJob:
 
 
 class SparseImage:
+    """Read Android sparse images without loading large chunks into memory."""
+
+    _IO_CHUNK_SIZE = 1024 * 1024
+
     def __init__(self, fd):
         self._fd = fd
         self.header = None
 
+    def _read_exact(self, size, description):
+        data = self._fd.read(size)
+        if len(data) != size:
+            raise LpUnpackError(f'Sparse image {description} is truncated.')
+        return data
+
     def check(self):
         self._fd.seek(0)
-        self.header = SparseHeader(self._fd.read(SPARSE_HEADER_SIZE))
-        return False if self.header.magic != SPARSE_HEADER_MAGIC else True
+        header_data = self._fd.read(SPARSE_HEADER_SIZE)
+        if len(header_data) != SPARSE_HEADER_SIZE:
+            return False
+        self.header = SparseHeader(header_data)
+        return self.header.magic == SPARSE_HEADER_MAGIC
 
-    def _read_data(self, chunk_data_size: int):
-        if self.header.chunk_hdr_sz > SPARSE_CHUNK_HEADER_SIZE:
-            self._fd.seek(self.header.chunk_hdr_sz - SPARSE_CHUNK_HEADER_SIZE, 1)
+    def _skip_chunk_header_extension(self):
+        extension_size = self.header.chunk_hdr_sz - SPARSE_CHUNK_HEADER_SIZE
+        if extension_size < 0:
+            raise LpUnpackError('Sparse image has an invalid chunk header size.')
+        if extension_size:
+            self._read_exact(extension_size, 'chunk header extension')
 
-        return self._fd.read(chunk_data_size)
+    def _consume(self, size, description):
+        remaining = size
+        while remaining:
+            chunk = self._fd.read(min(remaining, self._IO_CHUNK_SIZE))
+            if not chunk:
+                raise LpUnpackError(f'Sparse image {description} is truncated.')
+            remaining -= len(chunk)
+
+    def _write_repeated(self, out, pattern, size):
+        if not pattern:
+            raise LpUnpackError('Sparse image fill pattern is empty.')
+        block = (pattern * ((self._IO_CHUNK_SIZE + len(pattern) - 1) // len(pattern)))[:self._IO_CHUNK_SIZE]
+        remaining = size
+        while remaining:
+            count = min(remaining, len(block))
+            if out.write(block[:count]) != count:
+                raise LpUnpackError('Failed to write unsparsed image.')
+            remaining -= count
 
     def unsparse(self):
         if not self.header:
             self._fd.seek(0)
-            self.header = SparseHeader(self._fd.read(SPARSE_HEADER_SIZE))
-        chunks = self.header.total_chunks
+            self.header = SparseHeader(self._read_exact(SPARSE_HEADER_SIZE, 'header'))
+        if self.header.magic != SPARSE_HEADER_MAGIC:
+            raise LpUnpackError('Invalid sparse image magic.')
+        if self.header.file_hdr_sz < SPARSE_HEADER_SIZE:
+            raise LpUnpackError('Sparse image has an invalid file header size.')
+        if self.header.chunk_hdr_sz < SPARSE_CHUNK_HEADER_SIZE:
+            raise LpUnpackError('Sparse image has an invalid chunk header size.')
+        if self.header.blk_sz <= 0:
+            raise LpUnpackError('Sparse image has an invalid block size.')
+
         self._fd.seek(self.header.file_hdr_sz - SPARSE_HEADER_SIZE, 1)
         unsparse_file_dir = os.path.dirname(self._fd.name)
-        unsparse_file = os.path.join(unsparse_file_dir,
-                                     f"{os.path.splitext(os.path.basename(self._fd.name))[0]}.unsparse.img")
-        with open(str(unsparse_file), 'wb') as out:
-            sector_base = 82528
-            output_len = 0
-            while chunks > 0:
-                chunk_header = SparseChunkHeader(self._fd.read(SPARSE_CHUNK_HEADER_SIZE))
-                sector_size = (chunk_header.chunk_sz * self.header.blk_sz) >> 9
+        unsparse_file = os.path.join(
+            unsparse_file_dir,
+            f"{os.path.splitext(os.path.basename(self._fd.name))[0]}.unsparse.img",
+        )
+        logical_size = 0
+        with open(unsparse_file, 'wb') as out:
+            for _ in range(self.header.total_chunks):
+                chunk_header = SparseChunkHeader(
+                    self._read_exact(SPARSE_CHUNK_HEADER_SIZE, 'chunk header')
+                )
+                self._skip_chunk_header_extension()
+                output_size = chunk_header.chunk_sz * self.header.blk_sz
                 chunk_data_size = chunk_header.total_sz - self.header.chunk_hdr_sz
-                if chunk_header.chunk_type == 0xCAC1:
-                    data = self._read_data(chunk_data_size)
-                    len_data = len(data)
-                    if len_data == (sector_size << 9):
-                        out.write(data)
-                        output_len += len_data
-                        sector_base += sector_size
-                elif chunk_header.chunk_type == 0xCAC2:
-                    data = self._read_data(chunk_data_size)
-                    len_data = sector_size << 9
-                    out.truncate(out.tell() + len_data)
-                    out.seek(0, 2)
-                    output_len += len(data)
-                    sector_base += sector_size
-                elif chunk_header.chunk_type == 0xCAC3:
-                    data = self._read_data(chunk_data_size)
-                    len_data = sector_size << 9
-                    out.truncate(out.tell() + len_data)
-                    out.seek(0, 2)
-                    output_len += len(data)
-                    sector_base += sector_size
+                if chunk_data_size < 0:
+                    raise LpUnpackError('Sparse image chunk size is invalid.')
+
+                if chunk_header.chunk_type == 0xCAC1:  # RAW
+                    if chunk_data_size != output_size:
+                        raise LpUnpackError('Sparse RAW chunk size is invalid.')
+                    remaining = output_size
+                    while remaining:
+                        size = min(self._IO_CHUNK_SIZE, remaining)
+                        data = self._read_exact(size, 'RAW chunk')
+                        if out.write(data) != size:
+                            raise LpUnpackError('Failed to write unsparsed image.')
+                        remaining -= size
+                elif chunk_header.chunk_type == 0xCAC2:  # FILL
+                    if chunk_data_size != 4:
+                        raise LpUnpackError('Sparse FILL chunk size is invalid.')
+                    fill = self._read_exact(4, 'FILL chunk')
+                    self._write_repeated(out, fill, output_size)
+                elif chunk_header.chunk_type == 0xCAC3:  # DONT_CARE
+                    if chunk_data_size:
+                        self._consume(chunk_data_size, 'DONT_CARE chunk')
+                    out.seek(output_size, 1)
+                elif chunk_header.chunk_type == 0xCAC4:  # CRC32
+                    if output_size or chunk_data_size != 4:
+                        raise LpUnpackError('Sparse CRC32 chunk size is invalid.')
+                    self._read_exact(4, 'CRC32 chunk')
                 else:
-                    len_data = sector_size << 9
-                    out.truncate(out.tell() + len_data)
-                    out.seek(0, 2)
-                    sector_base += sector_size
-                chunks -= 1
+                    raise LpUnpackError(
+                        f'Unsupported sparse chunk type: {chunk_header.chunk_type:#x}'
+                    )
+                logical_size += output_size
+
+            expected_size = self.header.total_blks * self.header.blk_sz
+            if logical_size != expected_size:
+                raise LpUnpackError('Sparse image logical size does not match its header.')
+            out.truncate(expected_size)
         return unsparse_file
 
 
@@ -680,16 +744,26 @@ class LpUnpack:
     def _check_out_dir_exists(self):
         if self._out_dir is None:
             return
-
-        if not os.path.exists(self._out_dir):
-            os.makedirs(self._out_dir, exist_ok=True)
+        output_dir = os.path.abspath(self._out_dir)
+        if os.path.islink(output_dir):
+            raise LpUnpackError(f'Output directory cannot be a symbolic link: {output_dir}')
+        if os.path.exists(output_dir) and not os.path.isdir(output_dir):
+            raise LpUnpackError(f'Output path is not a directory: {output_dir}')
+        os.makedirs(output_dir, exist_ok=True)
+        self._out_dir = output_dir
 
     def _extract_partition(self, unpack_job: UnpackJob):
         self._check_out_dir_exists()
+        name = validate_partition_name(unpack_job.name)
         start = dti()
-        print(f'Extracting partition [{unpack_job.name}]')
-        out_file = os.path.join(self._out_dir, f'{unpack_job.name}.img')
-        with open(str(out_file), 'wb') as out:
+        print(f'Extracting partition [{name}]')
+        output_dir = os.path.abspath(self._out_dir)
+        out_file = os.path.abspath(os.path.join(output_dir, f'{name}.img'))
+        if os.path.commonpath((output_dir, out_file)) != output_dir:
+            raise LpUnpackError(f'Partition output escapes destination: {name!r}')
+        if os.path.lexists(out_file) and os.path.islink(out_file):
+            raise LpUnpackError(f'Partition output cannot be a symbolic link: {out_file}')
+        with open(out_file, 'wb') as out:
             for part in unpack_job.parts:
                 offset, size = part
                 self._write_extent_to_file(out, offset, size, unpack_job.geometry.logical_block_size)
@@ -806,13 +880,13 @@ class LpUnpack:
 
     def _write_extent_to_file(self, fd: IO, offset: int, size: int, block_size: int):
         self._fd.seek(offset)
-        for block in self._read_chunk(block_size):
-            if size == 0:
-                break
-
+        remaining = size
+        while remaining:
+            block = self._fd.read(min(block_size, remaining))
+            if not block:
+                raise LpUnpackError('Super image ended before an extent was complete.')
             fd.write(block)
-
-            size -= block_size
+            remaining -= len(block)
 
     def get_info(self):
         try:
@@ -836,10 +910,8 @@ class LpUnpack:
 
             return filter_partition
 
-        except LpUnpackError as e:
-            print(e.message)
-            sys.exit(1)
-
+        except LpUnpackError:
+            raise
         finally:
             self._fd.close()
 
@@ -884,10 +956,8 @@ class LpUnpack:
                 for partition in metadata.partitions:
                     self._extract(partition, metadata)
 
-        except LpUnpackError as e:
-            print(e.message)
-            sys.exit(1)
-
+        except LpUnpackError:
+            raise
         finally:
             self._fd.close()
 

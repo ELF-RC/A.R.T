@@ -1,119 +1,127 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# ====================================================
-#          FILE: sdat2img.py
-#       AUTHORS: xpirt - luxi78 - howellzhu
-#          DATE: 2018-10-27 10:33:21 CEST
-# ====================================================
+"""Safely reconstruct a raw image from a non-incremental Android DAT bundle."""
 
 from __future__ import print_function
 
-import errno
-import os
-import sys
+from pathlib import Path
 
 
-def main(TRANSFER_LIST_FILE, NEW_DATA_FILE, OUTPUT_IMAGE_FILE):
-    __version__ = '1.2'
+BLOCK_SIZE = 4096
 
-    print('sdat2img binary - version: {}\n'.format(__version__))
 
-    def rangeset(src):
-        src_set = src.split(',')
-        num_set = [int(item) for item in src_set]
-        if len(num_set) != num_set[0] + 1:
-            print('Error on parsing following data to rangeset:\n{}'.format(src), file=sys.stderr)
-            sys.exit(1)
+class SdatError(RuntimeError):
+    """Raised when a DAT bundle is incomplete or requires unsupported OTA state."""
 
-        return tuple([(num_set[i], num_set[i + 1]) for i in range(1, len(num_set), 2)])
 
-    def parse_transfer_list_file(path):
-        trans_list = open(TRANSFER_LIST_FILE, 'r')
-
-        # First line in transfer list is the version number
-        version = int(trans_list.readline())
-
-        # Second line in transfer list is the total number of blocks we expect to write
-        new_blocks = int(trans_list.readline())
-
-        if version >= 2:
-            # Third line is how many stash entries are needed simultaneously
-            trans_list.readline()
-            # Fourth line is the maximum number of blocks that will be stashed simultaneously
-            trans_list.readline()
-
-        # Subsequent lines are all individual transfer commands
-        commands = []
-        for line in trans_list:
-            line = line.split(' ')
-            cmd = line[0]
-            if cmd in ['erase', 'new', 'zero']:
-                commands.append([cmd, rangeset(line[1])])
-            else:
-                # Skip lines starting with numbers, they are not commands anyway
-                if not cmd[0].isdigit():
-                    print('Command "{}" is not valid.'.format(cmd), file=sys.stderr)
-                    trans_list.close()
-                    sys.exit(1)
-
-        trans_list.close()
-        return version, new_blocks, commands
-
-    BLOCK_SIZE = 4096
-
-    version, new_blocks, commands = parse_transfer_list_file(TRANSFER_LIST_FILE)
-
-    if version == 1:
-        print('Android Lollipop 5.0 detected!\n')
-    elif version == 2:
-        print('Android Lollipop 5.1 detected!\n')
-    elif version == 3:
-        print('Android Marshmallow 6.x detected!\n')
-    elif version == 4:
-        print('Android Nougat 7.x / Oreo 8.x detected!\n')
-    else:
-        print('Unknown Android version!\n')
-
-    # Don't clobber existing files to avoid accidental data loss
+def _rangeset(source):
     try:
-        output_img = open(OUTPUT_IMAGE_FILE, 'wb')
-    except IOError as e:
-        if e.errno == errno.EEXIST:
-            print('Error: the output file "{}" already exists'.format(e.filename), file=sys.stderr)
-            print('Remove it, rename it, or choose a different file name.', file=sys.stderr)
-            sys.exit(e.errno)
-        else:
-            raise
+        values = [int(item) for item in source.strip().split(',')]
+    except ValueError as error:
+        raise SdatError(f'无法解析块范围: {source!r}') from error
+    if not values or len(values) != values[0] + 1:
+        raise SdatError(f'块范围长度无效: {source!r}')
 
-    new_data_file = open(NEW_DATA_FILE, 'rb')
-    all_block_sets = [i for command in commands for i in command[1]]
-    max_file_size = max(pair[1] for pair in all_block_sets) * BLOCK_SIZE
-
-    for command in commands:
-        if command[0] == 'new':
-            for block in command[1]:
-                begin = block[0]
-                end = block[1]
-                block_count = end - begin
-                print('\rCopying {} blocks into position {}...'.format(block_count, begin), end='')
-
-                # Position output file
-                output_img.seek(begin * BLOCK_SIZE)
-
-                # Copy one block at a time
-                while block_count > 0:
-                    output_img.write(new_data_file.read(BLOCK_SIZE))
-                    block_count -= 1
-        else:
-            print('Skipping command {}...'.format(command[0]))
-
-    # Make file larger if necessary
-    if output_img.tell() < max_file_size:
-        output_img.truncate(max_file_size)
-
-    output_img.close()
-    new_data_file.close()
-    print('Done! Output image: {}'.format(os.path.realpath(output_img.name)))
+    ranges = []
+    for index in range(1, len(values), 2):
+        begin, end = values[index:index + 2]
+        if begin < 0 or end < begin:
+            raise SdatError(f'块范围无效: {source!r}')
+        ranges.append((begin, end))
+    return tuple(ranges)
 
 
+def _parse_transfer_list(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as stream:
+            version = int(stream.readline().strip())
+            new_blocks = int(stream.readline().strip())
+            if new_blocks < 0:
+                raise SdatError('transfer.list 的块数不能为负数')
+            if version >= 2:
+                stream.readline()
+                stream.readline()
 
+            commands = []
+            for line_number, raw_line in enumerate(stream, start=5 if version >= 2 else 3):
+                fields = raw_line.split()
+                if not fields:
+                    continue
+                command = fields[0]
+                if command in {'new', 'zero', 'erase'}:
+                    if len(fields) != 2:
+                        raise SdatError(f'transfer.list 第 {line_number} 行缺少范围')
+                    commands.append((command, _rangeset(fields[1])))
+                elif command[0].isdigit():
+                    # transfer list comments/generated counters are not commands.
+                    continue
+                else:
+                    raise SdatError(
+                        f'不支持增量 OTA 命令 {command!r}；需要完整 new.dat 固件而非补丁包。'
+                    )
+    except OSError as error:
+        raise SdatError(f'无法读取 transfer.list: {path}: {error}') from error
+    except ValueError as error:
+        raise SdatError(f'transfer.list 头部无效: {path}') from error
+    return version, new_blocks, commands
+
+
+def _write_zeroes(output, count):
+    zeroes = b'\0' * min(BLOCK_SIZE, 1024 * 1024)
+    remaining = count * BLOCK_SIZE
+    while remaining:
+        block = zeroes[:min(len(zeroes), remaining)]
+        if output.write(block) != len(block):
+            raise SdatError('写入零块失败')
+        remaining -= len(block)
+
+
+def main(transfer_list_file, new_data_file, output_image_file):
+    """Build one raw image and remove an incomplete output on failure."""
+    version, new_blocks, commands = _parse_transfer_list(transfer_list_file)
+    print(f'sdat2img binary - version: 1.2\n')
+    android_versions = {
+        1: 'Android Lollipop 5.0',
+        2: 'Android Lollipop 5.1',
+        3: 'Android Marshmallow 6.x',
+        4: 'Android Nougat 7.x / Oreo 8.x',
+    }
+    print(f'{android_versions.get(version, "Unknown Android")} detected!\n')
+
+    output_path = Path(output_image_file)
+    source_path = Path(new_data_file)
+    if output_path.exists() or output_path.is_symlink():
+        raise SdatError(f'输出镜像已存在，拒绝覆盖: {output_path}')
+
+    largest_block = new_blocks
+    for _, ranges in commands:
+        for _, end in ranges:
+            largest_block = max(largest_block, end)
+
+    try:
+        with open(source_path, 'rb') as new_data, open(output_path, 'xb') as output:
+            for command, ranges in commands:
+                for begin, end in ranges:
+                    block_count = end - begin
+                    output.seek(begin * BLOCK_SIZE)
+                    if command == 'new':
+                        print(f'\rCopying {block_count} blocks into position {begin}...', end='')
+                        for _ in range(block_count):
+                            block = new_data.read(BLOCK_SIZE)
+                            if len(block) != BLOCK_SIZE:
+                                raise SdatError('new.dat 在完整写入镜像前结束')
+                            if output.write(block) != BLOCK_SIZE:
+                                raise SdatError('写入 raw image 失败')
+                    else:
+                        _write_zeroes(output, block_count)
+            output.truncate(largest_block * BLOCK_SIZE)
+            output.flush()
+    except Exception:
+        try:
+            output_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+    print(f'Done! Output image: {output_path.resolve()}')
+    return str(output_path)

@@ -1,14 +1,19 @@
+import fcntl
 import json
 import os
 import platform
 import re
+import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
 import time
 import zipfile
+from contextlib import contextmanager
 from glob import glob
+from pathlib import Path
 from hashlib import sha1
 
 import requests
@@ -24,6 +29,8 @@ from pys import imgextractor
 from pys import sdat2img
 from pys import gettype
 from pys import lpunpack
+from pys.project_layout import LayoutError, ProjectLayout, UnsupportedLayoutError
+
 PWD_DIR = os.getcwd() + os.sep
 MOD_DIR = PWD_DIR + "local/sub/"
 ROM_DIR = PWD_DIR
@@ -75,26 +82,39 @@ for prog in V.programs:
         sys.exit(f"[x] Not found: {prog}\n[i] Please install {prog} \n   Or add <{prog}> to {BIN_PATH}")
 
 
-def call(exe, kz='Y', out=0, shstate=False, sp=0):
-    cmd = f'{BIN_PATH}{exe}' if kz == "Y" else exe
-    if sp == 0:
-        cmd = cmd.split()
-    conf = 0
+def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None):
+    """Run a command with MIO-compatible argv handling and no implicit shell."""
+    del sp
+    if isinstance(exe, (list, tuple)):
+        # MIO drops optional empty arguments such as an unset boot flag.
+        cmd = [str(item) for item in exe if item not in (None, '')]
+        if kz == 'Y' and cmd and not os.path.isabs(cmd[0]):
+            cmd[0] = os.path.join(BIN_PATH, cmd[0])
+    elif shstate:
+        cmd = f'{BIN_PATH}{exe}' if kz == 'Y' else exe
+    else:
+        cmd = shlex.split(str(exe))
+        if kz == 'Y' and cmd and not os.path.isabs(cmd[0]):
+            cmd[0] = os.path.join(BIN_PATH, cmd[0])
+
     try:
-        ret = subprocess.Popen(cmd, shell=shstate, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, creationflags=conf)
-        for i in iter(ret.stdout.readline, b""):
+        process = subprocess.Popen(
+            cmd,
+            shell=shstate,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+    except OSError as error:
+        print(f'> 启动命令失败: {error}')
+        return 127
+
+    if process.stdout:
+        for line in iter(process.stdout.readline, b''):
             if out == 0:
-                print(i.decode("utf-8", "ignore").strip())
-    except subprocess.CalledProcessError as e:
-        ret = None
-        ret.wait = print
-        ret.returncode = 1
-        for i in iter(e.stdout.readline, b""):
-            if out == 0:
-                print(i.decode("utf-8", "ignore").strip())
-    ret.wait()
-    return ret.returncode
+                print(line.decode('utf-8', 'ignore').strip())
+    return process.wait()
 
 
 class CoastTime:
@@ -257,7 +277,7 @@ def env_setup():
             data = json.load(ss)
         for (name, value) in question_list.items():
             print(f"{YELLOW}[{'0' if i < 10 else ''}{i}]{CLOSE}\t{BOLD}{name}{CLOSE}: {GREEN}{data[value]}{CLOSE}")
-            data1[str(i)] = name
+            data1[f"{'0' if i < 10 else ''}{i}"] = name
             i += 1
         sum_ = input(f"\n请输入你要更改的序列，输入{YELLOW}00{CLOSE}为返回：")
         if sum_ in ["00", "0"]:
@@ -285,8 +305,419 @@ def find_file(path, rule):
                 yield os.path.join(root, file)
 
 
+def partition_name(image_path):
+    """Return the validated partition name represented by an image path."""
+    name = os.path.basename(image_path)
+    for suffix in ('.unsparse.img', '.new.dat.br', '.new.dat', '.img', '.win'):
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+            break
+    return ProjectLayout.validate_component(name, "分区")
+
+
+def workspace_partition(partition):
+    return str(V.layout.partition_dir(partition))
+
+
+def stage_dir(category):
+    return str(V.layout.create_stage_dir(category)) + os.sep
+
+
+def stage_copy(source, category):
+    """Copy a source into WORKSPACE/.tmp so INPUT is never modified in place."""
+    source_path = Path(source)
+    if not source_path.is_file():
+        raise FileNotFoundError(source_path)
+    destination_dir = Path(stage_dir(category))
+    destination = destination_dir / source_path.name
+    shutil.copy2(source_path, destination)
+    return str(destination)
+
+
+def partition_metadata_names(partition):
+    return (
+        f'{partition}_contexts.txt',
+        f'{partition}_fsconfig.txt',
+        f'{partition}_info.txt',
+        f'{partition}_space.txt',
+        f'{partition}_size.txt',
+        f'{partition}_kernel.txt',
+        f'{partition}_file_contexts',
+        f'{partition}_fs_config',
+    )
+
+
+def metadata_path(config_dir, partition, suffix):
+    return Path(config_dir) / f'{partition}{suffix}'
+
+
+def normalize_erofs_metadata(partition, config_dir):
+    """Normalize only this EROFS partition's metadata in a staging config directory."""
+    config_dir = Path(config_dir)
+    if config_dir.is_symlink() or not config_dir.is_dir():
+        raise LayoutError(f'{partition} 的 EROFS metadata 目录无效: {config_dir}')
+    raw_contexts = metadata_path(config_dir, partition, '_file_contexts')
+    raw_fsconfig = metadata_path(config_dir, partition, '_fs_config')
+    contexts = metadata_path(config_dir, partition, '_contexts.txt')
+    fsconfig = metadata_path(config_dir, partition, '_fsconfig.txt')
+    if raw_contexts.is_symlink() or raw_fsconfig.is_symlink():
+        raise LayoutError(f'{partition} 的 EROFS metadata 不能是符号链接')
+    if not (raw_contexts.is_file() and raw_fsconfig.is_file()):
+        print(f"> {partition} 的 EROFS metadata 不完整，已保留临时工作现场")
+        return False
+    os.replace(raw_contexts, contexts)
+    os.replace(raw_fsconfig, fsconfig)
+    return True
+
+
+def ensure_contexts_file(partition, config_dir):
+    """Create the canonical contexts file when an image has no SELinux xattrs."""
+    contexts = metadata_path(config_dir, partition, '_contexts.txt')
+    contexts.touch(exist_ok=True)
+    return contexts
+
+
+def create_partition_stage(partition, category, create_partition=True):
+    """Create an isolated extraction stage under WORKSPACE/.tmp."""
+    partition = ProjectLayout.validate_component(partition, '分区')
+    root = Path(stage_dir(category))
+    partition_dir = root / partition
+    config_dir = root / 'config'
+    if create_partition:
+        partition_dir.mkdir(parents=True, exist_ok=False)
+    config_dir.mkdir(parents=True, exist_ok=False)
+    return root, partition_dir, config_dir
+
+
+_COMMIT_JOURNAL_NAME = '.partition-commit.json'
+_COMMIT_LOCK_NAME = '.partition-commit.lock'
+
+
+def _fsync_file(path):
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise LayoutError(f'无法同步非普通文件: {path}')
+    flags = os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    try:
+        descriptor = os.open(path, flags)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    except OSError as error:
+        raise LayoutError(f'无法同步文件 {path}: {error}') from error
+
+
+def _fsync_directory(path):
+    """Synchronize a directory or fail before a transaction is marked complete."""
+    path = Path(path)
+    if path.is_symlink() or not path.is_dir():
+        raise LayoutError(f'无法同步目录: {path}')
+    flags = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0) | getattr(os, 'O_CLOEXEC', 0)
+    try:
+        descriptor = os.open(path, flags)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    except OSError as error:
+        raise LayoutError(f'无法同步目录 {path}: {error}') from error
+
+
+def _fsync_tree(root):
+    """Durably sync a staged partition tree without following Android symlinks."""
+    root = Path(root)
+    if root.is_symlink() or not root.is_dir():
+        raise LayoutError(f'无法同步分区目录: {root}')
+    directories = []
+    for current, dirs, files in os.walk(root, followlinks=False):
+        current_path = Path(current)
+        for filename in files:
+            candidate = current_path / filename
+            if candidate.is_symlink():
+                continue
+            if candidate.is_file():
+                _fsync_file(candidate)
+            else:
+                raise LayoutError(f'分区包含无法同步的条目: {candidate}')
+        directories.append(current_path)
+    for directory in reversed(directories):
+        _fsync_directory(directory)
+
+
+def _write_commit_journal(stage_root, journal):
+    journal_path = Path(stage_root) / _COMMIT_JOURNAL_NAME
+    temporary_path = journal_path.with_name(f'{journal_path.name}.{os.getpid()}.tmp')
+    with open(temporary_path, 'w', encoding='utf-8') as stream:
+        json.dump(journal, stream, ensure_ascii=False, sort_keys=True)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary_path, journal_path)
+    _fsync_directory(stage_root)
+
+
+def _remove_commit_journal(stage_root):
+    journal_path = Path(stage_root) / _COMMIT_JOURNAL_NAME
+    if journal_path.exists() or journal_path.is_symlink():
+        if journal_path.is_symlink() or not journal_path.is_file():
+            raise LayoutError(f'提交日志无效: {journal_path}')
+        journal_path.unlink()
+        _fsync_directory(stage_root)
+
+
+@contextmanager
+def _partition_commit_lock():
+    lock_path = Path(V.tmp) / _COMMIT_LOCK_NAME
+    V.layout.require_workspace_path(lock_path)
+    if lock_path.is_symlink():
+        raise LayoutError(f'提交锁无效: {lock_path}')
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as error:
+        raise LayoutError(f'无法创建提交锁: {lock_path}: {error}') from error
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
+def _load_commit_journal(stage_root):
+    journal_path = Path(stage_root) / _COMMIT_JOURNAL_NAME
+    if journal_path.is_symlink() or not journal_path.is_file():
+        raise LayoutError(f'提交日志无效: {journal_path}')
+    try:
+        with open(journal_path, 'r', encoding='utf-8') as stream:
+            journal = json.load(stream)
+    except (OSError, json.JSONDecodeError) as error:
+        raise LayoutError(f'无法读取提交日志: {journal_path}: {error}') from error
+    if not isinstance(journal, dict) or journal.get('version') != 1:
+        raise LayoutError(f'提交日志格式无效: {journal_path}')
+    return journal
+
+
+def _recover_partition_stage(stage_root, journal):
+    """Restore an interrupted commit, or finalize one durably marked complete."""
+    stage_root = Path(stage_root)
+    partition = ProjectLayout.validate_component(journal.get('partition'), '分区')
+    staged_partition = stage_root / partition
+    staged_config = stage_root / 'config'
+    old_partition = stage_root / '.previous-partition'
+    old_metadata = stage_root / '.previous-metadata'
+    target_partition = V.layout.partition_dir(partition)
+    canonical_config = Path(V.config)
+    metadata_names = tuple(journal.get('metadata_files', ()))
+    old_metadata_names = tuple(journal.get('old_metadata_names', ()))
+    known_names = set(partition_metadata_names(partition))
+    if not set(metadata_names).issubset(known_names) or not set(old_metadata_names).issubset(known_names):
+        raise LayoutError(f'提交日志包含未知 metadata: {stage_root}')
+    if staged_config.is_symlink() or not staged_config.is_dir():
+        raise LayoutError(f'提交 metadata 暂存目录无效: {staged_config}')
+
+    # The committed marker is written only after every promotion and directory
+    # fsync has completed. Its leftover journal can be removed without rolling
+    # a successful publication back.
+    if journal.get('phase') == 'committed':
+        _remove_commit_journal(stage_root)
+        return
+
+    # A promoted metadata file is absent from staging. Move it back first so
+    # old metadata can be restored without losing the new stage.
+    for name in metadata_names:
+        staged = staged_config / name
+        canonical = canonical_config / name
+        if not (staged.exists() or staged.is_symlink()) and (canonical.exists() or canonical.is_symlink()):
+            if canonical.is_symlink() or not canonical.is_file():
+                raise LayoutError(f'无法恢复 metadata: {canonical}')
+            os.replace(canonical, staged)
+
+    staged_exists = staged_partition.exists() or staged_partition.is_symlink()
+    target_exists = target_partition.exists() or target_partition.is_symlink()
+    old_exists = old_partition.exists() or old_partition.is_symlink()
+    if staged_partition.is_symlink() or target_partition.is_symlink() or old_partition.is_symlink():
+        raise LayoutError(f'恢复分区包含符号链接: {partition}')
+
+    if old_exists:
+        if not old_partition.is_dir():
+            raise LayoutError(f'无法恢复旧分区: {old_partition}')
+        if target_exists:
+            if not target_partition.is_dir():
+                raise LayoutError(f'无法恢复当前分区: {target_partition}')
+            if staged_exists:
+                raise LayoutError(f'恢复目标已存在: {staged_partition}')
+            os.replace(target_partition, staged_partition)
+        os.replace(old_partition, target_partition)
+    elif target_exists and not staged_exists:
+        # There was no original partition, and the new tree had already been
+        # promoted when interruption occurred.
+        if not target_partition.is_dir():
+            raise LayoutError(f'无法恢复当前分区: {target_partition}')
+        os.replace(target_partition, staged_partition)
+    elif target_exists and staged_exists:
+        # The journal was written but no partition move had happened yet.
+        if not (target_partition.is_dir() and staged_partition.is_dir()):
+            raise LayoutError(f'提交分区状态无效: {partition}')
+
+    for name in old_metadata_names:
+        backup = old_metadata / name
+        canonical = canonical_config / name
+        if backup.exists() or backup.is_symlink():
+            if backup.is_symlink() or not backup.is_file():
+                raise LayoutError(f'无法恢复旧 metadata: {backup}')
+            os.replace(backup, canonical)
+
+    _fsync_directory(V.layout.workspace_dir)
+    _fsync_directory(canonical_config)
+    _remove_commit_journal(stage_root)
+
+
+def _recover_pending_partition_commits_locked():
+    tmp_dir = Path(V.tmp)
+    for stage_root in tmp_dir.iterdir():
+        if stage_root.name in {_COMMIT_LOCK_NAME} or stage_root.is_symlink() or not stage_root.is_dir():
+            continue
+        journal_path = stage_root / _COMMIT_JOURNAL_NAME
+        if journal_path.exists() or journal_path.is_symlink():
+            _recover_partition_stage(stage_root, _load_commit_journal(stage_root))
+
+
+def recover_pending_partition_commits():
+    """Recover interrupted partition commits before writing into WORKSPACE."""
+    with _partition_commit_lock():
+        _recover_pending_partition_commits_locked()
+
+
+def commit_partition_stage(partition, stage_root, required_metadata, preserve_existing_metadata=False):
+    """Publish a validated partition stage under a project-wide commit lock.
+
+    Every mutable step is recorded in a journal retained inside the stage. A
+    later project open or commit rolls the stage back if this process is
+    interrupted, preserving either the previous complete tree or the staged
+    tree rather than a mixed WORKSPACE/config state.
+    """
+    partition = ProjectLayout.validate_component(partition, '分区')
+    stage_root = Path(stage_root)
+    if not V.layout.is_within_tmp(stage_root) or stage_root.is_symlink() or not stage_root.is_dir():
+        raise LayoutError(f'临时分区目录无效: {stage_root}')
+    if os.stat(stage_root).st_dev != os.stat(V.layout.workspace_dir).st_dev:
+        raise LayoutError('临时分区目录必须与 WORKSPACE 位于同一文件系统。')
+
+    staged_partition = stage_root / partition
+    staged_config = stage_root / 'config'
+    if staged_partition.is_symlink() or not staged_partition.is_dir():
+        raise LayoutError(f'{partition} 分区工作目录不存在: {staged_partition}')
+    if staged_config.is_symlink() or not staged_config.is_dir():
+        raise LayoutError(f'{partition} metadata 工作目录不存在: {staged_config}')
+
+    target_partition = V.layout.partition_dir(partition)
+    canonical_config = Path(V.config)
+    if canonical_config.is_symlink() or not canonical_config.is_dir():
+        raise LayoutError(f'工程 metadata 目录无效: {canonical_config}')
+    V.layout.require_workspace_path(canonical_config)
+
+    metadata_files = []
+    for name in partition_metadata_names(partition):
+        candidate = staged_config / name
+        if candidate.is_symlink():
+            raise LayoutError(f'{partition} metadata 不能是符号链接: {candidate}')
+        if candidate.exists():
+            if not candidate.is_file():
+                raise LayoutError(f'{partition} metadata 不是普通文件: {candidate}')
+            metadata_files.append(name)
+
+    required = set(required_metadata)
+    available = set(metadata_files)
+    if not required.issubset(available):
+        missing = ', '.join(sorted(required - available))
+        raise LayoutError(f'{partition} 缺少必要 metadata: {missing}')
+
+    _fsync_tree(staged_partition)
+    for name in metadata_files:
+        _fsync_file(staged_config / name)
+    _fsync_directory(staged_config)
+    _fsync_directory(stage_root)
+
+    with _partition_commit_lock():
+        _recover_pending_partition_commits_locked()
+        if target_partition.exists() or target_partition.is_symlink():
+            if target_partition.is_symlink() or not target_partition.is_dir():
+                raise LayoutError(f'现有分区目录无效: {target_partition}')
+
+        old_metadata_names = []
+        for name in partition_metadata_names(partition):
+            canonical = canonical_config / name
+            if not (canonical.exists() or canonical.is_symlink()):
+                continue
+            if canonical.is_symlink() or not canonical.is_file():
+                raise LayoutError(f'现有 metadata 无效: {canonical}')
+            if preserve_existing_metadata and name not in available:
+                continue
+            old_metadata_names.append(name)
+
+        old_partition = stage_root / '.previous-partition'
+        old_metadata = stage_root / '.previous-metadata'
+        if old_partition.exists() or old_partition.is_symlink() or old_metadata.exists() or old_metadata.is_symlink():
+            raise LayoutError(f'临时分区目录包含保留提交项: {stage_root}')
+        old_metadata.mkdir()
+        journal = {
+            'version': 1,
+            'partition': partition,
+            'metadata_files': metadata_files,
+            'old_metadata_names': old_metadata_names,
+            'preserve_existing_metadata': bool(preserve_existing_metadata),
+            'phase': 'prepared',
+        }
+        _write_commit_journal(stage_root, journal)
+        try:
+            if target_partition.exists():
+                os.replace(target_partition, old_partition)
+            journal['phase'] = 'old_partition_moved'
+            _write_commit_journal(stage_root, journal)
+
+            for name in old_metadata_names:
+                os.replace(canonical_config / name, old_metadata / name)
+            journal['phase'] = 'old_metadata_moved'
+            _write_commit_journal(stage_root, journal)
+
+            os.replace(staged_partition, target_partition)
+            journal['phase'] = 'partition_promoted'
+            _write_commit_journal(stage_root, journal)
+
+            promoted_metadata = []
+            for name in metadata_files:
+                os.replace(staged_config / name, canonical_config / name)
+                promoted_metadata.append(name)
+                journal['promoted_metadata'] = promoted_metadata
+                _write_commit_journal(stage_root, journal)
+
+            _fsync_directory(V.layout.workspace_dir)
+            _fsync_directory(canonical_config)
+            journal['phase'] = 'committed'
+            _write_commit_journal(stage_root, journal)
+            _remove_commit_journal(stage_root)
+        except BaseException:
+            try:
+                _recover_partition_stage(stage_root, _load_commit_journal(stage_root))
+            except BaseException:
+                # Keep the journal for deterministic recovery on the next open.
+                pass
+            raise
+
+
+def workspace_relative_path(relative_path):
+    """Resolve a configured relative path and keep it inside editable partitions."""
+    relative = Path(relative_path)
+    if relative.parts and relative.parts[0] in {'config', '.tmp'}:
+        raise LayoutError(f"不允许修改 WORKSPACE/{relative.parts[0]}")
+    return V.layout.require_workspace_path(Path(V.workspace, relative))
+
+
 def kill_avb():
-    for tab in find_file(V.project, "^fstab.*?"):
+    for tab in find_file(V.workspace, "^fstab.*?"):
         print(f"> 解除AVB加密: {tab}")
         with open(tab, "r") as sf:
             details = re.sub("avb.*?,", "", sf.read())
@@ -297,7 +728,7 @@ def kill_avb():
 
 
 def kill_dm():
-    for tab in find_file(V.project, "^fstab.*?"):
+    for tab in find_file(V.workspace, "^fstab.*?"):
         print(f"> 解除DM加密: {tab}")
         with open(tab, "r") as sf:
             details = re.sub("forceencrypt=", "encryptable=", sf.read())
@@ -310,49 +741,74 @@ def patch_kernel(boot):
     for dt in ('dtb', 'kernel_dtb', 'extra'):
         if os.path.isfile(dt):
             print(f"- Patch fstab in {dt}")
-            call(f"magiskboot dtb {dt} patch")
-        call(
-            "magiskboot hexpatch kernel 736B69705F696E697472616D667300 77616E745F696E697472616D667300")
-        call("magiskboot hexpatch kernel 77616E745F696E697472616D6673 736B69705F696E697472616D6673")
-        call("magiskboot hexpatch kernel 747269705F696E697472616D6673 736B69705F696E697472616D6673")
-        print("- Repacking boot image")
-        call(f"magiskboot repack {boot}")
+            call(['magiskboot', 'dtb', dt, 'patch'])
+    if os.path.isfile('kernel'):
+        # Keep the MIO patch sequence and execute it once per boot image.
+        call([
+            'magiskboot', 'hexpatch', 'kernel',
+            '49010054011440B93FA00F71E9000054010840B93FA00F7189000054001840B91FA00F7188010054',
+            'A1020054011440B93FA00F7140020054010840B93FA00F71E0010054001840B91FA00F7181010054',
+        ])
+        call(['magiskboot', 'hexpatch', 'kernel', '821B8012', 'E2FF8F12'])
+        call([
+            'magiskboot', 'hexpatch', 'kernel',
+            '736B69705F696E697472616D667300',
+            '77616E745F696E697472616D667300',
+        ])
+    print("- Repacking boot image")
+    return call(['magiskboot', 'repack', boot])
 
 
-def patch_twrp(BOOTIMG):
-    if os.path.isfile(
-            f"{PWD_DIR}local/etc/devices/{V.SETUP_MANIFEST['DEVICE_CODE']}/{V.SETUP_MANIFEST['ANDROID_SDK']}/ramdisk.cpio") and os.path.isfile(
-        BOOTIMG):
-        if os.path.isdir(f"{V.main_dir}bootimg"):
-            rmdire(f"{V.main_dir}bootimg")
-        os.makedirs(V.main_dir + "bootimg")
-        print("- Unpacking boot image")
-        os.chdir(V.main_dir + "bootimg")
-        call(f"magiskboot unpack {BOOTIMG}")
-        if os.path.isfile("kernel"):
-            if os.path.isfile("ramdisk.cpio"):
-                print(f"- Replace ramdisk twrp@{V.SETUP_MANIFEST['ANDROID_SDK']}")
-                shutil.copy(
-                    f"{PWD_DIR}local/etc/devices/{V.SETUP_MANIFEST['DEVICE_CODE']}/{V.SETUP_MANIFEST['ANDROID_SDK']}/ramdisk.cpio",
-                    os.path.join(os.path.abspath("."), "ramdisk.cpio"))
-                patch_kernel(BOOTIMG)
+def _prepare_boot_work():
+    """Create a disposable boot work directory inside WORKSPACE/.tmp."""
+    if os.path.isdir(V.boot_work):
+        shutil.rmtree(V.boot_work)
+    os.makedirs(V.boot_work, exist_ok=True)
+    return V.boot_work
 
-                if os.path.isfile("new-boot.img"):
-                    print("+ Done")
-                    if not os.path.isdir(V.out):
-                        os.mkdir(V.out)
-                    new_boot_img_name = f"{os.path.basename(BOOTIMG).split('.')[0]}{os.path.basename(V.out)}_twrp.img"
-                    os.rename("new-boot.img", os.path.join(V.out, new_boot_img_name))
-                    os.chdir(PWD_DIR)
-                    add_magisk = input("> 是否继续添加Magisk [1/0]: ")
-                    if add_magisk == "1":
-                        patch_magisk(f"{V.out}{os.path.basename(BOOTIMG).split('.')[0]}_twrp.img")
-        os.chdir(PWD_DIR)
-        if os.path.isdir(f"{V.main_dir}bootimg"):
-            rmdire(f"{V.main_dir}bootimg")
-    else:
+
+def patch_twrp(bootimg):
+    ramdisk = (
+        f"{PWD_DIR}local/etc/devices/{V.SETUP_MANIFEST['DEVICE_CODE']}/"
+        f"{V.SETUP_MANIFEST['ANDROID_SDK']}/ramdisk.cpio"
+    )
+    if not (os.path.isfile(ramdisk) and os.path.isfile(bootimg)):
         input(
-            f"> 未发现local/etc/devices/{V.SETUP_MANIFEST['DEVICE_CODE']}/{V.SETUP_MANIFEST['ANDROID_SDK']}/ramdisk.cpio文件")
+            f"> 未发现local/etc/devices/{V.SETUP_MANIFEST['DEVICE_CODE']}/"
+            f"{V.SETUP_MANIFEST['ANDROID_SDK']}/ramdisk.cpio文件"
+        )
+        return
+
+    work_dir = _prepare_boot_work()
+    staged_boot = os.path.join(work_dir, os.path.basename(bootimg))
+    output_boot = None
+    original_dir = os.getcwd()
+    try:
+        shutil.copy2(bootimg, staged_boot)
+        print("- Unpacking boot image")
+        os.chdir(work_dir)
+        if call(['magiskboot', 'unpack', str(staged_boot)]) != 0:
+            return
+        if not (os.path.isfile("kernel") and os.path.isfile("ramdisk.cpio")):
+            print("> boot 镜像缺少 kernel 或 ramdisk.cpio，无法注入 TWRP ramdisk")
+            return
+
+        print(f"- Replace ramdisk twrp@{V.SETUP_MANIFEST['ANDROID_SDK']}")
+        shutil.copy2(ramdisk, os.path.join(work_dir, "ramdisk.cpio"))
+        patch_kernel(staged_boot)
+        if not os.path.isfile("new-boot.img"):
+            print("> TWRP boot 回包失败")
+            return
+
+        os.makedirs(V.out, exist_ok=True)
+        output_boot = os.path.join(V.out, f"{Path(bootimg).stem}_twrp.img")
+        shutil.move(os.path.join(work_dir, "new-boot.img"), output_boot)
+        print(f"+ Done: {output_boot}")
+    finally:
+        os.chdir(original_dir)
+
+    if output_boot and input("> 是否继续添加Magisk [1/0]: ") == "1":
+        patch_magisk(output_boot)
 
 
 def patch_magisk(bootimg):
@@ -366,214 +822,286 @@ def patch_magisk(bootimg):
         'KEEPFORCEENCRYPT': "true",
         'PATCHVBMETAFLAG': "false",
         'TARGET': "arm",
-        'IS_64BIT': "true"}
+        'IS_64BIT': "true",
+    }
     for property_, value in default_manifest.items():
-        if property_ not in magisk_manifest:
-            magisk_manifest[property_] = value
+        magisk_manifest.setdefault(property_, value)
 
-    for k in ('KEEPVERITY', 'KEEPFORCEENCRYPT', 'PATCHVBMETAFLAG', 'IS_64BIT'):
-        if magisk_manifest[k] not in ('true', 'false'):
-            sys.exit(f"Invalid [{k}] - must be one of <true/false>")
+    for key in ('KEEPVERITY', 'KEEPFORCEENCRYPT', 'PATCHVBMETAFLAG', 'IS_64BIT'):
+        if magisk_manifest[key] not in ('true', 'false'):
+            print(f"Invalid [{key}] - must be one of <true/false>")
+            return
+    if magisk_manifest['CLASS'].lower() not in ('stable', 'alpha', 'canary'):
+        print("Invalid [CLASS] - must be one of <stable/alpha/canary>")
+        return
+    if magisk_manifest['TARGET'] not in ('arm', 'arm64', 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'):
+        print("Invalid [TARGET] - must be one of <arm/x86>")
+        return
+    if not os.path.isfile(bootimg):
+        print(f"> 未找到 boot 镜像: {bootimg}")
+        return
 
-    if magisk_manifest["CLASS"].lower() not in ('stable', 'alpha', 'canary'):
-        sys.exit("Invalid [CLASS] - must be one of <stable/alpha/canary>")
-    if magisk_manifest["TARGET"] not in ('arm', 'arm64', 'armeabi-v7a', 'arm64-v8a',
-                                         'x86', 'x86_64'):
-        sys.exit("Invalid [TARGET] - must be one of <arm/x86>")
     magisk_files = glob(f"{PWD_DIR}local/etc/magisk/{magisk_manifest['CLASS']}/Magisk-*.apk")
     if not magisk_files:
         input(f"> 未发现local/etc/magisk/{magisk_manifest['CLASS']}/Magisk-*.apk文件")
         return
-    if os.path.isfile(bootimg):
-        if os.path.isdir(f"{V.main_dir}bootimg"):
-            rmdire(f"{V.main_dir}bootimg")
-        os.makedirs(V.main_dir + "bootimg")
+    magisk_file = max(magisk_files, key=os.path.getmtime)
+    work_dir = _prepare_boot_work()
+    staged_boot = os.path.join(work_dir, os.path.basename(bootimg))
+    original_dir = os.getcwd()
+
+    try:
+        shutil.copy2(bootimg, staged_boot)
         print("- Unpacking boot image")
-        os.chdir(V.main_dir + "bootimg")
-        call(f"magiskboot unpack {bootimg}")
-        if os.path.isfile("kernel"):
-            if os.path.isfile("ramdisk.cpio"):
-                sha1_ = sha1()
-                with open(bootimg, "rb") as f:
-                    while True:
-                        file_data = f.read(2048)
-                        if not file_data:
-                            break
-                        else:
-                            sha1_.update(file_data)
-                SHA1 = sha1_.digest().hex()
-                with open(bootimg, 'rb') as source_file, open('stock_boot.img', 'wb') as dest_file:
-                    shutil.copyfileobj(source_file, dest_file)
+        os.chdir(work_dir)
+        if call(['magiskboot', 'unpack', str(staged_boot)]) != 0:
+            return
+        if not (os.path.isfile('kernel') and os.path.isfile('ramdisk.cpio')):
+            print("> boot 镜像缺少 kernel 或 ramdisk.cpio，无法修补 Magisk")
+            return
 
-                shutil.copy2('ramdisk.cpio', 'ramdisk.cpio.orig')
-                print(F"- Patching ramdisk magisk@{magisk_manifest['CLASS']}")
-                CONFIGS = f"KEEPVERITY={magisk_manifest['KEEPVERITY']}\nKEEPFORCEENCRYPT={magisk_manifest['KEEPFORCEENCRYPT']}\nPATCHVBMETAFLAG={magisk_manifest['PATCHVBMETAFLAG']}\n"
-                CONFIGS += f"RECOVERYMODE={str(os.path.isfile('recovery_dtbo')).lower()}\n"
-                if SHA1:
-                    CONFIGS += f"SHA1={SHA1}"
-                with open("config", "w", newline="\n") as cn:
-                    cn.write(CONFIGS)
-                is_64bit = magisk_manifest["IS_64BIT"] == "true"
-                target = magisk_manifest["TARGET"]
-                magisk_dict = {'magiskinit': "lib/armeabi-v7a/libmagiskinit.so",
-                               'magisk32': "lib/armeabi-v7a/libmagisk32.so",
-                               'magisk64': ""}
-                if re.match("arm", target):
-                    if is_64bit:
-                        magisk_dict["magiskinit"] = "lib/arm64-v8a/libmagiskinit.so"
-                        magisk_dict["magisk64"] = "lib/arm64-v8a/libmagisk64.so"
-                elif re.match("x86", target):
-                    magisk_dict["magiskinit"] = ('lib/x86/libmagiskinit.so',)
-                    magisk_dict["magisk32"] = "lib/x86/libmagisk32.so"
-                    if is_64bit:
-                        magisk_dict["magiskinit"] = ('lib/x86_64/libmagiskinit.so',)
-                        magisk_dict["magisk64"] = "lib/x86_64/libmagisk64.so"
-                magisk_files = sorted(magisk_files, key=(lambda x: os.path.getmtime(x)), reverse=True)
-                magisk_file = magisk_files[0]
-                fantasy_zip = zipfile.ZipFile(magisk_file)
-                zip_lists = fantasy_zip.namelist()
-                for (k, v) in magisk_dict.items():
-                    if v in zip_lists:
-                        fantasy_zip.extract(v)
-                        if os.path.isfile(v):
-                            try:
-                                os.renames(v, k)
-                            except FileExistsError:
-                                os.remove(k)
-                                os.renames(v, k)
-                fantasy_zip.close()
-                call("magiskboot compress=xz magisk32 magisk32.xz")
-                call("magiskboot compress=xz magisk64 magisk64.xz")
-                patch_cmds = 'magiskboot cpio ramdisk.cpio "add 0750 init magiskinit" "mkdir 0750 overlay.d" "mkdir 0750 overlay.d/sbin" "add 0644 overlay.d/sbin/magisk32.xz magisk32.xz" '
+        sha1_ = sha1()
+        with open(staged_boot, 'rb') as source_file:
+            for block in iter(lambda: source_file.read(2048), b''):
+                sha1_.update(block)
+        sha1_value = sha1_.digest().hex()
+        shutil.copy2(staged_boot, os.path.join(work_dir, 'stock_boot.img'))
+        shutil.copy2('ramdisk.cpio', 'ramdisk.cpio.orig')
 
-                if is_64bit:
-                    patch_cmds += '"add 0644 overlay.d/sbin/magisk64.xz magisk64.xz" '
-                patch_cmds += '"patch" "backup ramdisk.cpio.orig" "mkdir 000 .backup" "add 000 .backup/.magisk config"'
-                call(patch_cmds)
-                for file_pattern in ['ramdisk.cpio.orig', 'config', 'magisk*.xz', 'magiskinit', 'magisk*']:
-                    for file_to_delete in glob(file_pattern):
-                        try:
-                            os.remove(file_to_delete)
-                            print(f"Clean: {file_to_delete}")
-                        except Exception as e:
-                            print(f"Error deleting {file_to_delete}: {e}")
-                patch_kernel(bootimg)
+        configs = (
+            f"KEEPVERITY={magisk_manifest['KEEPVERITY']}\n"
+            f"KEEPFORCEENCRYPT={magisk_manifest['KEEPFORCEENCRYPT']}\n"
+            f"PATCHVBMETAFLAG={magisk_manifest['PATCHVBMETAFLAG']}\n"
+            f"RECOVERYMODE={str(os.path.isfile('recovery_dtbo')).lower()}\n"
+            f"SHA1={sha1_value}"
+        )
+        with open('config', 'w', encoding='utf-8', newline='\n') as config_file:
+            config_file.write(configs)
 
-                if os.path.isfile("new-boot.img"):
-                    print("+ Done")
-                    if not os.path.isdir(V.out):
-                        os.mkdir(V.out)
-                    new_boot_img_name = os.path.basename(bootimg).split(".")[0] + "_magisk.img"
-                    destination_path = os.path.join(V.out, new_boot_img_name)
-                    shutil.move("new-boot.img", destination_path)
-                    if os.path.isdir(V.main_dir + "system" + os.sep + "system"):
-                        try:
-                            os.makedirs(
-                                V.main_dir + "system" + os.sep + "system" + os.sep + "data-app" + os.sep + "Magisk")
-                        except:
-                            pass
-                        else:
-                            destination_path = os.path.join(V.main_dir, 'system', 'system', 'data-app',
-                                                            'Magisk',
-                                                            'Magisk.apk')
-                            shutil.copy(magisk_file, destination_path)
-                    elif os.path.isdir(V.main_dir + "vendor"):
-                        os.makedirs(V.main_dir + "vendor" + os.sep + "data-app" + os.sep + "Magisk")
-                        destination_path = os.path.join(V.main_dir, 'vendor', 'data-app', 'Magisk',
-                                                        'Magisk.apk')
-                        shutil.copy(magisk_file, destination_path)
-            os.chdir(PWD_DIR)
-            if os.path.isdir(f"{V.main_dir}bootimg"):
-                rmdire(f"{V.main_dir}bootimg")
+        is_64bit = magisk_manifest['IS_64BIT'] == 'true'
+        target = magisk_manifest['TARGET']
+        magisk_entries = {
+            'magiskinit': 'lib/armeabi-v7a/libmagiskinit.so',
+            'magisk32': 'lib/armeabi-v7a/libmagisk32.so',
+            'magisk64': '',
+        }
+        if target in ('arm64', 'arm64-v8a') and is_64bit:
+            magisk_entries['magiskinit'] = 'lib/arm64-v8a/libmagiskinit.so'
+            magisk_entries['magisk64'] = 'lib/arm64-v8a/libmagisk64.so'
+        elif target in ('x86', 'x86_64'):
+            magisk_entries['magiskinit'] = 'lib/x86/libmagiskinit.so'
+            magisk_entries['magisk32'] = 'lib/x86/libmagisk32.so'
+            if is_64bit:
+                magisk_entries['magiskinit'] = 'lib/x86_64/libmagiskinit.so'
+                magisk_entries['magisk64'] = 'lib/x86_64/libmagisk64.so'
+
+        with zipfile.ZipFile(magisk_file) as magisk_zip:
+            zip_names = set(magisk_zip.namelist())
+            for output_name, archive_name in magisk_entries.items():
+                if archive_name and archive_name in zip_names:
+                    extracted = magisk_zip.extract(archive_name, work_dir)
+                    shutil.move(extracted, os.path.join(work_dir, output_name))
+
+        if not (os.path.isfile('magiskinit') and os.path.isfile('magisk32')):
+            print('> Magisk APK 缺少必要的 magiskinit 或 magisk32 库')
+            return
+        if call(['magiskboot', 'compress=xz', 'magisk32', 'magisk32.xz']) != 0:
+            return
+        if is_64bit and call(['magiskboot', 'compress=xz', 'magisk64', 'magisk64.xz']) != 0:
+            return
+
+        print(f"- Patching ramdisk magisk@{magisk_manifest['CLASS']}")
+        patch_args = [
+            'magiskboot', 'cpio', 'ramdisk.cpio',
+            'add 0750 init magiskinit',
+            'mkdir 0750 overlay.d',
+            'mkdir 0750 overlay.d/sbin',
+            'add 0644 overlay.d/sbin/magisk32.xz magisk32.xz',
+        ]
+        if is_64bit:
+            patch_args.append('add 0644 overlay.d/sbin/magisk64.xz magisk64.xz')
+        patch_args.extend([
+            'patch',
+            'backup ramdisk.cpio.orig',
+            'mkdir 000 .backup',
+            'add 000 .backup/.magisk config',
+        ])
+        if call(patch_args) != 0:
+            return
+        patch_kernel(staged_boot)
+        if not os.path.isfile('new-boot.img'):
+            print('> Magisk boot 回包失败')
+            return
+
+        os.makedirs(V.out, exist_ok=True)
+        output_image = os.path.join(V.out, f'{Path(bootimg).stem}_magisk.img')
+        shutil.move(os.path.join(work_dir, 'new-boot.img'), output_image)
+        print(f'+ Done: {output_image}')
+
+        system_target = Path(V.workspace) / 'system' / 'system'
+        vendor_target = Path(V.workspace) / 'vendor'
+        if system_target.is_dir():
+            apk_target = system_target / 'data-app' / 'Magisk' / 'Magisk.apk'
+        elif vendor_target.is_dir():
+            apk_target = vendor_target / 'data-app' / 'Magisk' / 'Magisk.apk'
+        else:
+            apk_target = None
+        if apk_target:
+            apk_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(magisk_file, apk_target)
+    finally:
+        os.chdir(original_dir)
 
 
 def patch_addons():
-    if os.path.isdir(f"{PWD_DIR}local/etc/devices/default/{V.SETUP_MANIFEST['ANDROID_SDK']}/addons"):
-        display(f"复制 default/{V.SETUP_MANIFEST['ANDROID_SDK']}/* ...")
+    addon_roots = [
+        (
+            'default',
+            os.path.join(
+                PWD_DIR,
+                'local',
+                'etc',
+                'devices',
+                'default',
+                V.SETUP_MANIFEST['ANDROID_SDK'],
+                'addons',
+            ),
+        ),
+        (
+            V.SETUP_MANIFEST['DEVICE_CODE'],
+            os.path.join(
+                PWD_DIR,
+                'local',
+                'etc',
+                'devices',
+                V.SETUP_MANIFEST['DEVICE_CODE'],
+                V.SETUP_MANIFEST['ANDROID_SDK'],
+                'addons',
+            ),
+        ),
+    ]
+    for device, source_dir in addon_roots:
+        if not os.path.isdir(source_dir):
+            continue
+        display(f"复制 {device}/{V.SETUP_MANIFEST['ANDROID_SDK']}/* 到 WORKSPACE ...")
         try:
-            shutil.copytree(os.path.join(PWD_DIR, "local", "etc", "devices", "default", V.SETUP_MANIFEST["ANDROID_SDK"],
-                                         "addons"), V.main_dir, dirs_exist_ok=True)
-        except Exception as e:
-            print("Error copying files:", e)
-    if os.path.isdir(
-            f"{PWD_DIR}local/etc/devices/{V.SETUP_MANIFEST['DEVICE_CODE']}/{V.SETUP_MANIFEST['ANDROID_SDK']}/addons"):
-        display(f"复制 {V.SETUP_MANIFEST['DEVICE_CODE']}/{V.SETUP_MANIFEST['ANDROID_SDK']}/* ...")
-        source_dir = os.path.join(PWD_DIR, "local", "etc", "devices", V.SETUP_MANIFEST["DEVICE_CODE"],
-                                  V.SETUP_MANIFEST["ANDROID_SDK"], "addons")
-        try:
-            shutil.copytree(source_dir, V.main_dir, dirs_exist_ok=True)
-        except Exception as e:
-            print("Error copying files:", e)
+            shutil.copytree(source_dir, V.workspace, dirs_exist_ok=True)
+        except Exception as error:
+            print("Error copying files:", error)
+
+
+def _super_partitions_in_out():
+    patterns = ('system*', 'product*', 'vendor*', 'odm*', 'my_*')
+    partitions = set()
+    for pattern in patterns:
+        for image in glob(os.path.join(V.out, f'{pattern}.img')):
+            label = Path(image).stem
+            if label == 'super':
+                continue
+            if label.endswith(('_a', '_b')):
+                label = label[:-2]
+            try:
+                partitions.add(ProjectLayout.validate_component(label, '分区'))
+            except LayoutError:
+                continue
+    return sorted(partitions)
+
+
+def _stage_super_image(source, stage):
+    """Copy one OUT image to .tmp before sparse conversion for lpmake."""
+    staged = os.path.join(stage, os.path.basename(source))
+    shutil.copy2(source, staged)
+    if gettype.gettype(staged) != 'sparse':
+        return staged
+    raw_image = imgextractor.ULTRAMAN().APPLE(staged)
+    if not raw_image or not os.path.isfile(raw_image):
+        raise LayoutError(f'无法转换 sparse 镜像: {source}')
+    return raw_image
 
 
 def repack_super():
-    parts_1 = [
-        'system*',
-        'product',
-        'vendor*',
-        'odm',
-        "my_*"
+    parts = _super_partitions_in_out()
+    if not parts:
+        input('> 未发现 OUT 文件夹下可用于合成 super 的镜像文件')
+        return
+
+    stage = stage_dir('super-repack')
+    stage_output = os.path.join(stage, 'super.img')
+    group_name = V.SETUP_MANIFEST['GROUP_NAME']
+    super_size = V.SETUP_MANIFEST['SUPER_SIZE']
+    argvs = [
+        'lpmake',
+        '--metadata-size', '65536',
+        '--super-name', 'super',
+        '--device', f'super:{super_size}',
     ]
-    parts = []
-    for i in parts_1:
-        for file in glob(V.out + i + '.img'):
-            parts.append(os.path.basename(file).rsplit('.', 1)[0])
-    argvs = f'lpmake --metadata-size 65536 --super-name super --device super:{V.SETUP_MANIFEST["SUPER_SIZE"]}:{int(V.SETUP_MANIFEST["SUPER_SECTOR"]) * 512} '
-    if V.SETUP_MANIFEST['IS_VAB'] == '1':
-        argvs += '--metadata-slots 3 --virtual-ab -F '
-        for i in parts:
-            if os.path.isfile(V.out + i + '.img'):
-                img_a = V.out + i + '.img'
-                file_type = gettype.gettype(img_a)
-                print(img_a)
-                if file_type == 'sparse':
-                    new_img_a = imgextractor.ULTRAMAN().APPLE(img_a)
-                    if os.path.isfile(new_img_a):
-                        os.remove(img_a)
-                        img_a = new_img_a
-                argvs += f'--partition {i}_a:readonly:{imgextractor.ULTRAMAN().LEMON(img_a)}:{V.SETUP_MANIFEST["GROUP_NAME"]}_a --image {i}_a={img_a} --partition {i}_b:readonly:0:{V.SETUP_MANIFEST["GROUP_NAME"]}_b '
-    else:
-        argvs += '--metadata-slots 2 '
-        for i in parts:
-            if os.path.isfile(V.out + i + '_b.img'):
-                img_b = V.out + i + '_b.img'
-                img_a = V.out + i + '.img'
-                if os.path.isfile(V.out + i + '_a.img'):
-                    img_a = V.out + i + '_a.img'
-                file_type_a = gettype.gettype(img_a)
-                file_type_b = gettype.gettype(img_b)
-                if file_type_a == 'sparse':
-                    new_img_a = imgextractor.ULTRAMAN().APPLE(img_a)
-                    if os.path.isfile(new_img_a):
-                        os.remove(img_a)
-                        img_a = new_img_a
-                if file_type_b == 'sparse':
-                    new_img_b = imgextractor.ULTRAMAN().APPLE(img_b)
-                    if os.path.isfile(new_img_b):
-                        os.remove(img_b)
-                        img_b = new_img_b
-                image_size_a = imgextractor.ULTRAMAN().LEMON(img_a)
-                image_size_b = imgextractor.ULTRAMAN().LEMON(img_b)
-                argvs += f'--partition {i}_a:readonly:{image_size_a}:{V.SETUP_MANIFEST["GROUP_NAME"]}_a --image {i}_a={img_a} --partition {i}_b:readonly:{image_size_b}:{V.SETUP_MANIFEST["GROUP_NAME"]}_b --image {i}_b={img_b} '
-    if not parts or "--image" not in argvs:
-        input('> 未发现out文件夹下存在可用镜像文件')
+    image_parts = []
+
+    try:
+        if V.SETUP_MANIFEST['IS_VAB'] == '1':
+            argvs.extend(['--metadata-slots', '3', '--virtual-ab', '-F'])
+            for part in parts:
+                source = os.path.join(V.out, f'{part}.img')
+                if not os.path.isfile(source):
+                    source = os.path.join(V.out, f'{part}_a.img')
+                if not os.path.isfile(source):
+                    continue
+                image_a = _stage_super_image(source, stage)
+                image_size_a = imgextractor.ULTRAMAN().LEMON(image_a)
+                argvs.extend([
+                    '--partition', f'{part}_a:readonly:{image_size_a}:{group_name}_a',
+                    '--image', f'{part}_a={image_a}',
+                    '--partition', f'{part}_b:readonly:0:{group_name}_b',
+                ])
+                image_parts.append(part)
+        else:
+            argvs.extend(['--metadata-slots', '2'])
+            for part in parts:
+                source_a = os.path.join(V.out, f'{part}_a.img')
+                source_b = os.path.join(V.out, f'{part}_b.img')
+                if not os.path.isfile(source_a):
+                    source_a = os.path.join(V.out, f'{part}.img')
+                if not (os.path.isfile(source_a) and os.path.isfile(source_b)):
+                    continue
+                image_a = _stage_super_image(source_a, stage)
+                image_b = _stage_super_image(source_b, stage)
+                size_a = imgextractor.ULTRAMAN().LEMON(image_a)
+                size_b = imgextractor.ULTRAMAN().LEMON(image_b)
+                argvs.extend([
+                    '--partition', f'{part}_a:readonly:{size_a}:{group_name}_a',
+                    '--image', f'{part}_a={image_a}',
+                    '--partition', f'{part}_b:readonly:{size_b}:{group_name}_b',
+                    '--image', f'{part}_b={image_b}',
+                ])
+                image_parts.append(part)
+    except (LayoutError, OSError) as error:
+        print(f'> 准备 super 镜像失败: {error}')
+        return
+
+    if not image_parts:
+        input('> 未发现与当前 A/B 设置匹配的 OUT 分区镜像')
         return
     if V.SETUP_MANIFEST['SUPER_SPARSE'] == '1':
-        argvs += '--sparse '
-    argvs += f'--group {V.SETUP_MANIFEST["GROUP_NAME"]}_a:{V.SETUP_MANIFEST["SUPER_SIZE"]} --group {V.SETUP_MANIFEST["GROUP_NAME"]}_b:{V.SETUP_MANIFEST["SUPER_SIZE"]} --output {V.out + "super.img"} '
+        argvs.append('--sparse')
+    argvs.extend([
+        '--group', f'{group_name}_a:{super_size}',
+        '--group', f'{group_name}_b:{super_size}',
+        '--output', stage_output,
+    ])
     display(
-        f'重新合成: super.img <Size:{V.SETUP_MANIFEST["SUPER_SIZE"]}|Vab:{V.SETUP_MANIFEST["IS_VAB"]}|Sparse:{V.SETUP_MANIFEST["SUPER_SPARSE"]}>')
-    display(f"包含分区：{'|'.join(parts)}")
+        f'重新合成: super.img <Size:{super_size}|Vab:{V.SETUP_MANIFEST["IS_VAB"]}|'
+        f'Sparse:{V.SETUP_MANIFEST["SUPER_SPARSE"]}>'
+    )
+    display(f"包含分区：{'|'.join(image_parts)}")
     with CoastTime():
-        call(argvs)
-    try:
-        if os.path.isfile(os.path.join(V.out, 'super.img')):
-            for i in parts:
-                for slot in ('_a', '_b', ''):
-                    if os.path.isfile(os.path.join(V.out, i + slot + '.img')):
-                        os.remove(os.path.join(V.out, i + slot + '.img'))
-    except Exception:
-        pass
+        result = call(argvs)
+    if result != 0 or not os.path.isfile(stage_output):
+        print('> super.img 合成失败；OUT 中的现有分区镜像未被修改')
+        return
+
+    os.makedirs(V.out, exist_ok=True)
+    os.replace(stage_output, os.path.join(V.out, 'super.img'))
+    print(f'> super.img 已输出到 {V.out}')
 
 
 def walk_contexts(contexts):
@@ -616,28 +1144,59 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
             read = "rw"
             block_size = 4096
             blocks = ceil(int(size) / int(block_size))
-            mkimage_cmd = f"make_ext4fs -J -T {timestamp} -S {contexts} -C {fsconfig} -l {size} -L {label} -a /{label} {distance} {source}"
-            mke2fs_a_cmd = f"mke2fs -O ^has_journal,^metadata_csum,extent,huge_file,^flex_bg,^64bit,uninit_bg,dir_nlink,extra_isize -t {fs_variant} -b {block_size} -L {label} -I 256 -M {mount_point} -m 0 -q -F {distance} {blocks}"
-            e2fsdroid_a_cmd = f"e2fsdroid -T {timestamp} -C {fsconfig} -S {contexts} -f {source} -a /{label} -e {distance}"
+            mkimage_cmd = [
+                'make_ext4fs', '-J', '-T', str(timestamp), '-S', contexts, '-C', fsconfig,
+                '-l', str(size), '-L', label, '-a', f'/{label}', distance, source,
+            ]
+            mke2fs_a_cmd = [
+                'mke2fs', '-O', '^has_journal,^metadata_csum,extent,huge_file,^flex_bg,^64bit,uninit_bg,dir_nlink,extra_isize',
+                '-L', label, '-I', '256', '-M', mount_point, '-m', '0', '-t', 'ext4', '-b', str(block_size),
+                distance, str(blocks),
+            ]
+            e2fsdroid_a_cmd = [
+                'e2fsdroid', '-e', '-T', str(timestamp), '-S', contexts, '-C', fsconfig,
+                '-a', f'/{label}', '-f', source, distance,
+            ]
         else:
             size = fsize
             if int(V.SETUP_MANIFEST["ANDROID_SDK"]) <= 9:
                 read = "rw"
-                mkimage_cmd = f"make_ext4fs -J -T {timestamp} -S {contexts} -C {fsconfig} -l {size} -L {label} -a /{label} {distance} {source}"
+                mkimage_cmd = [
+                    'make_ext4fs', '-J', '-T', str(timestamp), '-S', contexts, '-C', fsconfig,
+                    '-l', str(size), '-L', label, '-a', f'/{label}', distance, source,
+                ]
             else:
-                mkimage_cmd = f"make_ext4fs -T {timestamp} -S {contexts} -C {fsconfig} -l {size} -L {label} -a /{label} {distance} {source}"
-            mke2fs_a_cmd = f"mke2fs -O ^has_journal,^metadata_csum,extent,huge_file,^flex_bg,^64bit,uninit_bg,dir_nlink,extra_isize -t {fs_variant} -b {block_size} -L {label} -I 256 -N {inodes} -M {mount_point} -m 0 -g {per_group} -q -F {distance} {blocks}"
-            e2fsdroid_a_cmd = f"e2fsdroid -T {timestamp} -C {fsconfig} -S {contexts} -f {source} -a /{label} -e -s {distance}"
+                mkimage_cmd = [
+                    'make_ext4fs', '-T', str(timestamp), '-S', contexts, '-C', fsconfig,
+                    '-l', str(size), '-L', label, '-a', f'/{label}', distance, source,
+                ]
+            mke2fs_a_cmd = [
+                'mke2fs', '-O', '^has_journal,^metadata_csum,extent,huge_file,^flex_bg,^64bit,uninit_bg,dir_nlink,extra_isize',
+                '-L', label, '-I', '256', '-N', str(inodes), '-M', mount_point, '-m', '0', '-g', str(per_group),
+                '-t', 'ext4', '-b', str(block_size), distance, str(blocks),
+            ]
+            e2fsdroid_a_cmd = [
+                'e2fsdroid', '-e', '-T', str(timestamp), '-S', contexts, '-C', fsconfig,
+                '-a', f'/{label}', '-f', source, '-s', distance,
+            ]
     else:
         fs_variant = "erofs"
-        mkerofs_cmd = "mkfs.erofs "
+        mkerofs_cmd = ['mkfs.erofs']
         if not re.match("5.3", platform.uname().release):
-            mkerofs_cmd += "-E legacy-compress "
+            mkerofs_cmd.extend(['-E', 'legacy-compress'])
         if V.SETUP_MANIFEST["RESIZE_EROFSIMG"] == "1":
-            mkerofs_cmd += "-zlz4hc,1 "
+            mkerofs_cmd.append('-zlz4hc,1')
         elif V.SETUP_MANIFEST["RESIZE_EROFSIMG"] == "2":
-            mkerofs_cmd += "-zlz4,1 "
-        mkerofs_cmd += f"-T {timestamp} --mount-point=/{label} --fs-config-file={fsconfig} --file-contexts={contexts} {distance} {source}"
+            mkerofs_cmd.append('-zlz4,1')
+        mkerofs_cmd.extend([
+            '-T', str(timestamp),
+            f'--mount-point=/{label}',
+            f'--product-out={V.workspace}',
+            f'--fs-config-file={fsconfig}',
+            f'--file-contexts={contexts}',
+            distance,
+            source,
+        ])
     printinform = f"Size:{size}|FsT:{fs_variant}|FsR:{read}|Sparse:{V.SETUP_MANIFEST['REPACK_SPARSE_IMG']}"
     if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "0":
         if V.SETUP_MANIFEST["RESIZE_IMG"] == "1" and V.SETUP_MANIFEST["REPACK_TO_RW"] == "1":
@@ -670,14 +1229,14 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
     if os.path.isfile(distance):
         print(" Done")
         if resize2_rw:
-            os.system(f"e2fsck -E unshare_blocks {distance}")
+            call(['e2fsck', '-E', 'unshare_blocks', distance])
             if dumpinfo:
                 if int(os.path.getsize(distance)) > int(fsize):
-                    os.system(f"resize2fs -M {distance}")
+                    call(['resize2fs', '-M', distance])
                 if V.SETUP_MANIFEST["RESIZE_IMG"] == "1":
                     if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "0":
                         if V.SETUP_MANIFEST["REPACK_TO_RW"] == "1":
-                            os.system(f"resize2fs -M {distance}")
+                            call(['resize2fs', '-M', distance])
         op_list = V.input + "dynamic_partitions_op_list"
         new_op_list = V.out + "dynamic_partitions_op_list"
         if os.path.isfile(op_list) or os.path.isfile(new_op_list):
@@ -717,7 +1276,7 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
 
         if flag > 8 or (V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1"):
             display("开始转换: sparse format ...")
-            call(f"img2simg {distance} {distance.rsplit('.', 1)[0] + '_sparse.img'}")
+            call(['img2simg', distance, distance.rsplit('.', 1)[0] + '_sparse.img'])
             if os.path.exists(distance):
                 try:
                     os.remove(distance)
@@ -740,7 +1299,7 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
                             level = V.SETUP_MANIFEST["REPACK_BR_LEVEL"]
                             display(f"重新生成: {label}.new.dat.br | Level={level} ...", 3)
                             newdat_brotli = newdat + ".br"
-                            call(f"brotli -{level}jfo {newdat_brotli} {newdat}")
+                            call(['brotli', f'-{level}jfo', newdat_brotli, newdat])
                             print(f" {GREEN}打包成功{CLOSE}" if os.path.isfile(
                                 newdat_brotli) else f" {RED}打包失败{CLOSE}")
                     else:
@@ -760,38 +1319,50 @@ def rmdire(path):
 
 
 def unpackboot(file, distance):
-    or_dir = os.getcwd()
-    rmdire(distance)
-    os.makedirs(distance)
-    os.chdir(distance)
-    shutil.copy(file, os.path.join(distance, "boot_o.img"))
-    if call("magiskboot unpack -h %s" % file) != 0:
-        print("Unpack %s Fail..." % file)
-        os.chdir(or_dir)
-        shutil.rmtree(distance)
-        return
-    if os.path.isfile(distance + os.sep + "ramdisk.cpio"):
-        comp = gettype.gettype(distance + os.sep + "ramdisk.cpio")
-        print("Ramdisk is %s" % comp)
-        with open(distance + os.sep + "comp", "w") as f:
-            f.write(comp)
-        if comp != "unknow":
-            os.rename(distance + os.sep + "ramdisk.cpio",
-                      distance + os.sep + "ramdisk.cpio.comp")
-            if call("magiskboot decompress %s %s" % (
-                    distance + os.sep + "ramdisk.cpio.comp",
-                    distance + os.sep + "ramdisk.cpio")) != 0:
+    """Unpack a boot image into a staging directory and report success."""
+    original_dir = os.getcwd()
+    work_dir = Path(distance)
+    try:
+        rmdire(work_dir)
+        work_dir.mkdir(parents=True, exist_ok=False)
+        shutil.copy2(file, work_dir / "boot_o.img")
+        os.chdir(work_dir)
+        if call(['magiskboot', 'unpack', '-h', str(file)]) != 0:
+            print(f"Unpack {file} Fail...")
+            return False
+
+        ramdisk = work_dir / 'ramdisk.cpio'
+        if not ramdisk.is_file():
+            print("Unpack Done!")
+            return True
+
+        comp = gettype.gettype(str(ramdisk))
+        print(f"Ramdisk is {comp}")
+        (work_dir / 'comp').write_text(comp, encoding='utf-8')
+        if comp != 'unknow':
+            compressed_ramdisk = work_dir / 'ramdisk.cpio.comp'
+            os.replace(ramdisk, compressed_ramdisk)
+            if call([
+                'magiskboot',
+                'decompress',
+                str(compressed_ramdisk),
+                str(ramdisk),
+            ]) != 0:
                 print("Decompress Ramdisk Fail...")
-                return
-        if not os.path.exists(distance + os.sep + "ramdisk"):
-            os.mkdir(distance + os.sep + "ramdisk")
-        os.chdir(distance)
+                return False
+
+        ramdisk_dir = work_dir / 'ramdisk'
+        ramdisk_dir.mkdir(exist_ok=True)
         print("Unpacking Ramdisk...")
-        call('cpio -i -d -F ramdisk.cpio -D ramdisk')
-        os.chdir(or_dir)
-    else:
-        print("Unpack Done!")
-    os.chdir(or_dir)
+        if call(['cpio', '-i', '-d', '-F', 'ramdisk.cpio', '-D', 'ramdisk']) != 0:
+            print("Unpack Ramdisk Fail...")
+            return False
+        return True
+    except OSError as error:
+        print(f"Unpack {file} Fail: {error}")
+        return False
+    finally:
+        os.chdir(original_dir)
 
 
 def dboot(infile, dist):
@@ -816,7 +1387,7 @@ def dboot(infile, dist):
             comp = compf.read()
         print("Compressing:%s" % comp)
         if comp != "unknow":
-            if call("magiskboot compress=%s ramdisk-new.cpio" % comp) != 0:
+            if call(['magiskboot', f'compress={comp}', 'ramdisk-new.cpio']) != 0:
                 print("Pack Ramdisk Fail...")
                 os.remove("ramdisk-new.cpio")
                 return
@@ -835,7 +1406,8 @@ def dboot(infile, dist):
             flag = "-n"
     else:
         os.chdir(infile)
-    if call("magiskboot repack %s %s" % (flag, os.path.join(infile, "boot_o.img"))) != 0:
+    repack_args = ['magiskboot', 'repack', flag, os.path.join(infile, "boot_o.img")]
+    if call(repack_args) != 0:
         print("Pack boot Fail...")
         return
     else:
@@ -851,183 +1423,319 @@ def boot_utils(source, distance, flag=1):
         os.makedirs(distance)
     if flag == 1:
         display(f"正在分解: {os.path.basename(source)}")
-        unpackboot(source, distance)
-    elif flag == 2:
+        return unpackboot(source, distance)
+    if flag == 2:
         display(f"重新合成: {os.path.basename(source)}.img")
-        dboot(source, distance)
+        return dboot(source, distance)
+    return False
 
 
-def decompress_img(source, distance, keep=1):
+def _stage_work_source(source, category):
+    """Return a writable copy unless the source already belongs to WORKSPACE/.tmp."""
+    source = str(Path(source).resolve())
+    if V.layout.is_within_tmp(source):
+        return source
+    return stage_copy(source, category)
+
+
+def _destination_partition(distance, source):
+    if distance:
+        candidate = os.path.basename(os.path.normpath(distance))
+    else:
+        candidate = partition_name(source)
+    V.layout.partition_dir(candidate)
+    return candidate
+
+
+def _safe_remove_workspace_dir(path):
+    path = V.layout.require_workspace_path(path)
+    if path.is_dir():
+        shutil.rmtree(path)
+
+
+def _super_images_to_process(super_dir):
+    images = sorted(glob(os.path.join(super_dir, '*.img')))
+    if V.SETUP_MANIFEST['IS_VAB'] != '1':
+        return [(image, partition_name(image)) for image in images if os.path.getsize(image) > 0]
+
+    selected = []
+    for image in images:
+        stem = os.path.basename(image).rsplit('.', 1)[0]
+        if stem.endswith('_b') or os.path.getsize(image) == 0:
+            continue
+        if stem.endswith('_a'):
+            partition = stem[:-2]
+            canonical = os.path.join(super_dir, f'{partition}.img')
+            shutil.copy2(image, canonical)
+            selected.append((canonical, partition))
+        else:
+            selected.append((image, partition_name(image)))
+    return selected
+
+
+def _canonical_stage_source(source, partition, stage_root):
+    """Keep extractor-derived metadata names aligned with the target partition."""
+    try:
+        if Path(source).suffix == '.img' and partition_name(source) == partition:
+            return source
+    except LayoutError:
+        pass
+    staged_source = Path(stage_root) / f'{partition}.img'
+    shutil.copy2(source, staged_source)
+    return str(staged_source)
+
+
+def _commit_extracted_partition(partition, stage_root, required_metadata, preserve_existing_metadata=False):
+    try:
+        commit_partition_stage(
+            partition,
+            stage_root,
+            required_metadata,
+            preserve_existing_metadata=preserve_existing_metadata,
+        )
+    except (LayoutError, OSError) as error:
+        print(f'> {partition} 分解结果未提交，临时现场已保留: {error}')
+        return False
+    return True
+
+
+def decompress_img(source, distance=None, keep=1):
+    """Extract one image through WORKSPACE/.tmp before replacing a partition."""
+    del keep
+    source_type = gettype.gettype(source)
+    if source_type not in ('boot', 'vendor_boot', 'sparse', 'ext', 'erofs', 'super'):
+        print(f'> 不支持的镜像类型: {source_type}')
+        return
     if os.path.basename(source) in ('dsp.img', 'exaid.img', 'cust.img'):
         return
+
+    try:
+        working_source = _stage_work_source(source, 'image')
+        partition = _destination_partition(distance, working_source)
+    except (LayoutError, OSError) as error:
+        print(f'> 无法准备镜像: {error}')
+        return
+
+    destination = workspace_partition(partition)
     s_time = time.time()
-    file_type = gettype.gettype(source)
-    if file_type in ['boot', 'vendor_boot']:
-        if os.path.isdir(distance):
-            shutil.rmtree(distance)
-        os.makedirs(distance)
-        boot_utils(source, distance)
-        if not os.path.isdir(V.config):
-            os.makedirs(V.config)
-        boot_info = V.config + os.path.basename(distance) + '_kernel.txt'
-        open(boot_info, 'w', encoding='utf-8').close()
+    file_type = gettype.gettype(working_source)
+    committed = False
+
+    if file_type in ('boot', 'vendor_boot'):
+        try:
+            stage_root, staged_partition, staged_config = create_partition_stage(partition, 'boot-extract')
+            if not boot_utils(working_source, str(staged_partition)):
+                raise LayoutError(f'{partition} boot 解包失败')
+            if not (staged_partition / 'boot_o.img').is_file():
+                raise LayoutError(f'{partition} boot 解包未生成 boot_o.img')
+            metadata_path(staged_config, partition, '_kernel.txt').touch()
+            committed = _commit_extracted_partition(
+                partition, stage_root, {f'{partition}_kernel.txt'})
+        except (LayoutError, OSError) as error:
+            print(f'> {partition} boot 分解失败，临时现场已保留: {error}')
     elif file_type == 'sparse':
-        display(f'正在转换: Unsparse Format [{os.path.basename(source)}] ...')
-        new_source = imgextractor.ULTRAMAN().APPLE(source)
-        if os.path.isfile(new_source):
-            if keep == 0:
-                os.remove(source)
-            decompress_img(new_source, distance)
-    if file_type in ['ext', 'erofs', 'super']:
-        if file_type != 'ext':
-            display(f'正在分解: {os.path.basename(source)} <{file_type}>', 3)
-        if not os.path.isdir(V.config):
-            os.makedirs(V.config)
-        if file_type == 'ext':
-            with Console().status(f"[yellow]正在提取{os.path.basename(source)}[/]"):
-                try:
-                    imgextractor.ULTRAMAN().MONSTER(source, distance)
-                except:
-                    shutil.rmtree(distance)
-                    os.unlink(source)
+        display(f'正在转换: Unsparse Format [{os.path.basename(working_source)}] ...')
+        try:
+            source_is_canonical = (
+                Path(working_source).suffix == '.img'
+                and partition_name(working_source) == partition
+            )
+        except LayoutError:
+            source_is_canonical = False
+        if source_is_canonical:
+            sparse_source = working_source
         else:
-            if file_type == 'erofs':
-                with open(V.config + os.path.basename(distance) + '_size.txt', 'w') as sf:
-                    sf.write(str(os.path.getsize(source)))
-                if 'unsparse' in os.path.basename(source):
-                    try:
-                        os.rename(source, source.replace('.unsparse', ''))
-                    except Exception as e:
-                        print("Error moving file:", e)
-                    source = source.replace('.unsparse', '')
-                call(f'extract.erofs -i {source.replace(os.sep, "/")} -o {V.main_dir} -x')
-            elif file_type == 'super':
-                lpunpack.unpack(source,V.input )
-                for img in glob(V.input + '*_*.img'):
-                    if not V.SETUP_MANIFEST['IS_VAB'] == '1' or os.path.getsize(img) == 0:
-                        os.remove(img)
-                    else:
-                        new_source = img.replace('_a.img', '.img')
-                        try:
-                            os.rename(img, new_source)
-                        except:
-                            pass
-                        new_source = img.replace('_b.img', '.img')
-                        try:
-                            os.rename(img, new_source)
-                        except:
-                            pass
-                j = input('> 是否继续分解img [0/1]: ') == 1
-                if j != 1:
-                    return
-                for img in glob(V.input + '*.img'):
-                    decompress_img(img, V.main_dir + os.path.basename(img).rsplit('.', 1)[0], keep=0)
-            else:
-                print(F'> ..., not support fs_type [{file_type}]')
-            distance = V.main_dir + os.path.basename(source).replace('.unsparse.img', '').replace('.img', '')
-            if os.path.isdir(distance):
-                if os.path.isdir(V.main_dir + 'config'):
-                    contexts = V.main_dir + 'config' + os.sep + os.path.basename(source).replace(
-                        '.unsparse.img',
-                        '').replace('.img',
-                                    '') + '_file_contexts'
-                    fsconfig = V.main_dir + 'config' + os.sep + os.path.basename(source).replace(
-                        '.unsparse.img',
-                        '').replace('.img',
-                                    '') + '_fs_config'
-                    if os.path.isfile(contexts) and os.path.isfile(fsconfig):
-                        new_contexts = V.config + os.path.basename(source).replace('.unsparse.img',
-                                                                                   '').replace(
-                            '.img', '') + '_contexts.txt'
-                        new_fsconfig = V.config + os.path.basename(source).replace('.unsparse.img',
-                                                                                   '').replace(
-                            '.img', '') + '_fsconfig.txt'
-                        shutil.copy(contexts, new_contexts)
-                        shutil.copy(fsconfig, new_fsconfig)
-                        shutil.rmtree(V.main_dir + 'config')
-                    else:
-                        if os.path.isdir(V.main_dir + 'config'):
-                            shutil.rmtree(V.main_dir + 'config')
-
-        if os.path.isdir(distance):
-            print('\x1b[1;32m %ds Done\x1b[0m' % (time.time() - s_time))
-            if keep == 0:
-                if os.path.isfile(source):
-                    os.remove(source)
-                if os.path.isfile(source.rsplit('.', 1)[0] + '.unsparse.img'):
-                    os.remove(source.rsplit('.', 1)[0] + '.unsparse.img')
+            sparse_source = _canonical_stage_source(
+                working_source,
+                partition,
+                Path(stage_dir('sparse')),
+            )
+        raw_source = imgextractor.ULTRAMAN().APPLE(sparse_source)
+        if raw_source and os.path.isfile(raw_source):
+            decompress_img(raw_source, destination)
         else:
-            if file_type != 'super':
-                echo('[red][Failed][/]')
+            echo('[red][Failed][/]')
+        return
+    elif file_type == 'ext':
+        try:
+            stage_root, staged_partition, staged_config = create_partition_stage(partition, 'ext-extract')
+            extractor_source = _canonical_stage_source(working_source, partition, stage_root)
+            with Console().status(f"[yellow]正在提取{os.path.basename(working_source)}[/]"):
+                imgextractor.ULTRAMAN().MONSTER(extractor_source, str(staged_partition))
+            ensure_contexts_file(partition, staged_config)
+            committed = _commit_extracted_partition(
+                partition,
+                stage_root,
+                {
+                    f'{partition}_contexts.txt',
+                    f'{partition}_fsconfig.txt',
+                    f'{partition}_info.txt',
+                },
+            )
+        except Exception as error:
+            print(f'> EXT4 分解失败，临时现场已保留: {error}')
+    elif file_type == 'erofs':
+        display(f'正在分解: {os.path.basename(working_source)} <{file_type}>', 3)
+        try:
+            stage_root, staged_partition, staged_config = create_partition_stage(
+                partition,
+                'erofs-extract',
+                create_partition=False,
+            )
+            extractor_source = _canonical_stage_source(working_source, partition, stage_root)
+            with open(metadata_path(staged_config, partition, '_size.txt'), 'w', encoding='utf-8') as size_file:
+                size_file.write(str(os.path.getsize(extractor_source)))
+            if call(['extract.erofs', '-i', extractor_source, '-o', str(stage_root), '-x']) != 0:
+                print('> EROFS 分解失败，临时现场已保留')
+            elif normalize_erofs_metadata(partition, staged_config):
+                committed = _commit_extracted_partition(
+                    partition,
+                    stage_root,
+                    {
+                        f'{partition}_contexts.txt',
+                        f'{partition}_fsconfig.txt',
+                        f'{partition}_size.txt',
+                    },
+                )
+        except (LayoutError, OSError) as error:
+            print(f'> EROFS 分解失败，临时现场已保留: {error}')
+    elif file_type == 'super':
+        display(f'正在分解: {os.path.basename(working_source)} <{file_type}>', 3)
+        super_dir = stage_dir('super')
+        try:
+            lpunpack.unpack(working_source, super_dir)
+        except (Exception, SystemExit) as error:
+            print(f'> super 分解失败: {error}')
+            return
+        if input('> 是否继续分解img [0/1]: ') != '1':
+            return
+        for image, image_partition in _super_images_to_process(super_dir):
+            decompress_img(image, workspace_partition(image_partition))
+        return
+
+    if committed:
+        print('\x1b[1;32m %ds Done\x1b[0m' % (time.time() - s_time))
+    elif file_type not in ('boot', 'vendor_boot'):
+        echo('[red][Failed][/]')
 
 
-def decompress_dat(transfer, source, distance, keep=0):
-    sTime = time.time()
-    if os.path.isfile(source + ".1"):
-        max__ = V.SETUP_MANIFEST["UNPACK_SPLIT_DAT"]
-        display(f"合并: {os.path.basename(source)}.1~{max__} ...")
-        with open(source, "ab") as f:
-            for i in range(1, int(max__)):
-                if os.path.exists("{}.{}".format(source, i)):
-                    with open("{}.{}".format(source, i), "rb") as f2:
-                        f.write(f2.read())
-                    try:
-                        os.remove("{}.{}".format(source, i))
-                    except:
-                        pass
-
-    display(f"正在分解: {os.path.basename(source)} ...", 3)
-    sdat2img.main(transfer, source, distance)
-    if os.path.isfile(distance):
-        tTime = time.time() - sTime
-        print("\x1b[1;32m [%ds]\x1b[0m" % tTime)
-        if keep == 0:
-            os.remove(source)
-            os.remove(transfer)
-            if os.path.isfile(source.rsplit(".", 2)[0] + ".patch.dat"):
-                os.remove(source.rsplit(".", 2)[0] + ".patch.dat")
-        elif keep == 2:
-            os.remove(source)
-        decompress_img(distance, V.main_dir + os.path.basename(distance).split(".")[0], 0)
-    else:
-        print("\x1b[1;31m [Failed]\x1b[0m")
+def _numbered_fragments(source):
+    """Return contiguous .1/.2/... fragments or reject an incomplete bundle."""
+    source_path = Path(source)
+    if source_path.is_symlink() or not source_path.is_file():
+        raise LayoutError(f'数据文件无效: {source_path}')
+    fragments = {}
+    prefix = f'{source_path.name}.'
+    for candidate in source_path.parent.iterdir():
+        if candidate.name == source_path.name or not candidate.name.startswith(prefix):
+            continue
+        suffix = candidate.name[len(prefix):]
+        if not suffix.isdigit():
+            continue
+        index = int(suffix)
+        if index < 1 or candidate.is_symlink() or not candidate.is_file() or index in fragments:
+            raise LayoutError(f'分段数据文件无效: {candidate}')
+        fragments[index] = candidate
+    if fragments:
+        expected = set(range(1, max(fragments) + 1))
+        missing = sorted(expected - set(fragments))
+        if missing:
+            raise LayoutError(f'分段数据缺失: {", ".join(map(str, missing))}')
+    return [fragments[index] for index in sorted(fragments)]
 
 
-def decompress_bro(transfer, source, distance, keep=0):
-    s_time = time.time()
-    display(f"正在分解: {os.path.basename(source)} ...", 3)
-    call(f"brotli -df {source} -o {distance}")
-    if os.path.isfile(distance):
+def _stage_split_bundle(source, category):
+    """Copy and combine input split files only inside WORKSPACE/.tmp."""
+    source_path = Path(source)
+    fragments = _numbered_fragments(source_path)
+    stage = Path(stage_dir(category))
+    staged_source = stage / source_path.name
+    sources = [source_path, *fragments]
+    with open(staged_source, 'xb') as destination_file:
+        for index, fragment in enumerate(sources):
+            if index:
+                display(f'合并: {fragment.name} ...')
+            with open(fragment, 'rb') as source_file:
+                shutil.copyfileobj(source_file, destination_file, length=1024 * 1024)
+    return str(staged_source)
+
+
+def decompress_dat(transfer, source, distance=None, keep=0):
+    """Convert a complete DAT bundle in .tmp, then extract its raw image."""
+    del distance, keep
+    if not transfer or not os.path.isfile(transfer):
+        print(f'> 未找到 {os.path.basename(source).split(".")[0]}.transfer.list')
+        return
+
+    try:
+        s_time = time.time()
+        staged_source = _stage_split_bundle(source, 'dat')
+        partition = partition_name(staged_source)
+        raw_image = os.path.join(os.path.dirname(staged_source), f'{partition}.img')
+        display(f"正在分解: {os.path.basename(staged_source)} ...", 3)
+        sdat2img.main(transfer, staged_source, raw_image)
+        if not os.path.isfile(raw_image):
+            raise sdat2img.SdatError('未生成 raw image')
         print("\x1b[1;32m [%ds]\x1b[0m" % (time.time() - s_time))
-        if keep == 0:
-            os.remove(source)
-        elif keep == 1:
-            keep = 2
-        if transfer:
-            decompress_dat(transfer, distance, distance.rsplit(".", 2)[0] + ".img", keep)
-    else:
-        print("\x1b[1;31m [Failed]\x1b[0m")
+        decompress_img(raw_image, workspace_partition(partition))
+    except (LayoutError, OSError, ValueError, sdat2img.SdatError) as error:
+        print(f'> DAT 分解失败，临时现场已保留: {error}')
 
 
-def decompress_bin(infile, outdir, flag='1'):
-    os.system("clear")
-    if flag == "1":
+def decompress_bro(transfer, source, distance=None, keep=0):
+    """Combine BR fragments in .tmp, decompress, then run the DAT pipeline."""
+    del distance, keep
+    if not transfer or not os.path.isfile(transfer):
+        print(f'> 未找到 {os.path.basename(source).split(".")[0]}.transfer.list')
+        return
+
+    try:
+        s_time = time.time()
+        staged_source = _stage_split_bundle(source, 'brotli')
+        if not staged_source.endswith('.br'):
+            raise LayoutError(f'BROTLI 文件扩展名无效: {staged_source}')
+        staged_dat = staged_source[:-3]
+        display(f"正在分解: {os.path.basename(source)} ...", 3)
+        if call(['brotli', '-df', staged_source, '-o', staged_dat]) != 0:
+            raise LayoutError('brotli 解压失败')
+        if not os.path.isfile(staged_dat):
+            raise LayoutError('brotli 未生成 new.dat')
+        print("\x1b[1;32m [%ds]\x1b[0m" % (time.time() - s_time))
+        decompress_dat(transfer, staged_dat)
+    except (LayoutError, OSError) as error:
+        print(f'> BROTLI 分解失败，临时现场已保留: {error}')
+
+
+def _decompress_payload_images(payload, payload_dir, mode):
+    payload_partitions = extract_payload.info(payload).split()
+    if mode == '1':
         print(f"> {YELLOW}包含的所有镜像文件: {CLOSE}\n")
-        payload_partitions = extract_payload.info(infile).split()
+        print(' '.join(payload_partitions))
         partitions = input(
             f"> {RED}根据以上信息输入一个或多个镜像，以空格分开{CLOSE}\n> {MAGENTA}").split()
-        print("\n")
-        for part in partitions:
-            if part in payload_partitions:
-                extract_payload.run(infile, outdir, part)
+        for partition in partitions:
+            if partition in payload_partitions:
+                extract_payload.run(payload, payload_dir, partition)
     else:
-        print(f"> {YELLOW}提取【{os.path.basename(infile)}】所有镜像文件:{CLOSE}\n")
-        extract_payload.main(infile, outdir)
-        j = input('> 是否继续分解img [0/1]: ') == 1
-        if j != 1:
-            return
-        for img in glob(V.input + '*.img'):
-            decompress_img(img, V.main_dir + os.path.basename(img).rsplit('.', 1)[0], keep=0)
+        print(f"> {YELLOW}提取【{os.path.basename(payload)}】所有镜像文件:{CLOSE}\n")
+        extract_payload.main(payload, payload_dir)
+
+    if input('> 是否继续分解img [0/1]: ') != '1':
+        return
+    for image in sorted(glob(os.path.join(payload_dir, '*.img'))):
+        decompress_img(image, workspace_partition(partition_name(image)))
+
+
+def decompress_bin(infile, outdir=None, flag='1'):
+    """Extract payload images to WORKSPACE/.tmp; INPUT remains untouched."""
+    del outdir
+    os.system("clear")
+    try:
+        payload = _stage_work_source(infile, 'payload')
+        payload_dir = stage_dir('payload-images')
+        _decompress_payload_images(payload, payload_dir, flag)
+    except (LayoutError, OSError, AssertionError) as error:
+        print(f'> Payload 分解失败: {error}')
 
 
 def appendf(msg, log):
@@ -1037,172 +1745,205 @@ def appendf(msg, log):
         print(msg, file=file)
 
 
+def safe_extract_tar(archive, destination):
+    """Stream regular TAR members into a validated WORKSPACE staging directory."""
+    destination = Path(destination).resolve()
+    for member in archive:
+        if not (member.isdir() or member.isfile()) or member.issym() or member.islnk():
+            raise LayoutError(f'TAR 不支持的条目类型: {member.name}')
+        target = (destination / member.name).resolve()
+        try:
+            target.relative_to(destination)
+        except ValueError as error:
+            raise LayoutError(f'TAR 包含越界路径: {member.name}') from error
+        if sys.version_info >= (3, 12):
+            archive.extract(member, path=destination, filter='fully_trusted')
+        else:
+            archive.extract(member, path=destination)
+
+
+def _win_partition(source):
+    name = os.path.basename(source)
+    return ProjectLayout.validate_component(name.split('.', 1)[0], "分区")
+
+
 def decompress_win(infile_list):
-    parts = []
-    for i in infile_list:
-        if i.endswith(".win"):
-            parts.append(i)
-        main = os.path.join(os.path.dirname(i), os.path.basename(i).split(".")[0] + ".win")
-        if i == main:
-            continue
-        with open(main, "ab" if os.path.exists(main) else "wb") as f:
-            with open(i, "rb") as f2:
-                print(f'合并{i}到{main}')
-                f.write(f2.read())
+    groups = {}
+    for source in infile_list:
+        if os.path.isfile(source):
             try:
-                os.remove(i)
-            except:
-                pass
-    parts = list(set(parts))
-    for i in parts:
-        if not os.path.isdir(V.main_dir + os.path.basename(i).rsplit('.', 1)[0]):
-            os.makedirs(V.main_dir + os.path.basename(i).rsplit('.', 1)[0])
-        if not os.path.exists(i):
-            continue
-        if gettype.gettype(i) in ['erofs', 'ext', 'super', 'boot', 'vendor_boot']:
-            decompress_img(i, V.main_dir + os.path.basename(i).rsplit('.', 1)[0])
-        elif tarfile.is_tarfile(i):
-            with tarfile.open(i, 'r') as tar:
-                for n in tar.getmembers():
-                    print(f"正在提取:{n.name}")
-                    tar.extract(n, path=(V.main_dir + os.path.basename(i).rsplit('.', 1)[0]), filter='tar')
-            i = os.path.basename(i).rsplit('.', 1)[0]
-            fsconfig_0 = []
-            contexts_0 = []
-            symlinks_0 = []
-            if fsconfig_0:
-                fsconfig_0.sort()
-                if "vendor" in i or "odm" in i:
-                    fsconfig_0.insert(0, "/ 0 2000 0755")
-                    fsconfig_0.insert(1, i + " 0 2000 0755")
-                else:
-                    fsconfig_0.insert(0, "/ 0 0 0755")
-                    fsconfig_0.insert(1, i + " 0 0 0755")
-                appendf("\n".join((str(k) for k in fsconfig_0)), "%s_fsconfig.txt" % i)
-            if contexts_0:
-                contexts_0.sort()
-                sar = False
-                for c in contexts_0:
-                    if re.search(f"{i}/system/build\\.prop ", c):
-                        sar = True
-                        break
-                if sar:
-                    contexts_0.insert(0, "/ u:object_r:rootfs:s0")
-                    contexts_0.insert(1, "/{}(/.*)? u:object_r:rootfs:s0".format(i))
-                    contexts_0.insert(2, "/{} u:object_r:rootfs:s0".format(i))
-                    contexts_0.insert(3, "/{}/system(/.*)? u:object_r:system_file:s0".format(i))
-                else:
-                    contexts_0.insert(0, "/ u:object_r:system_file:s0")
-                    contexts_0.insert(1, "/{}(/.*)? u:object_r:system_file:s0".format(i))
-                    contexts_0.insert(2, "/{} u:object_r:system_file:s0".format(i))
-                appendf("\n".join((str(j) for j in contexts_0)), "%s_contexts.txt" % i)
-            if not symlinks_0 != -1:
-                symlinks_0.sort()
-                appendf("\n".join((str(h) for h in symlinks_0)), "%s_symlinks.txt" % i)
+                groups.setdefault(_win_partition(source), []).append(source)
+            except LayoutError as error:
+                print(f'> 跳过 {source}: {error}')
+
+    for partition, fragments in groups.items():
+        stage = stage_dir('win')
+        staged_win = os.path.join(stage, f'{partition}.win')
+        fragments.sort(key=lambda item: (not item.endswith('.win'), os.path.basename(item)))
+        with open(staged_win, 'wb') as destination_file:
+            for fragment in fragments:
+                print(f'合并 {fragment} 到 {staged_win}')
+                with open(fragment, 'rb') as source_file:
+                    shutil.copyfileobj(source_file, destination_file)
+
+        if gettype.gettype(staged_win) in ['erofs', 'ext', 'sparse', 'super', 'boot', 'vendor_boot']:
+            decompress_img(staged_win, workspace_partition(partition))
+        elif tarfile.is_tarfile(staged_win):
+            try:
+                stage_root, staged_partition, _ = create_partition_stage(partition, 'tar-extract')
+                with tarfile.open(staged_win, 'r') as archive:
+                    safe_extract_tar(archive, staged_partition)
+                if not _commit_extracted_partition(partition, stage_root, set()):
+                    continue
+                print(f'> {partition} TAR 分解完成')
+            except (LayoutError, OSError, tarfile.TarError) as error:
+                print(f'> TAR 分解失败，临时现场已保留: {error}')
+                continue
         else:
             input("未知格式")
 
 
 def decompress(infile, flag=4):
-    for part in infile:
-        if os.path.isfile(part) and flag < 4:
-            transfer = os.path.join(os.path.dirname(part), os.path.basename(part).split('.')[0] + '.transfer.list')
-            if not os.path.isfile(transfer):
-                if flag == 3:
+    for part in sorted(infile):
+        if not os.path.isfile(part):
+            continue
+        try:
+            if flag < 4:
+                transfer = os.path.join(os.path.dirname(part), os.path.basename(part).split('.')[0] + '.transfer.list')
+                if not os.path.isfile(transfer):
+                    print(f'> 跳过 {os.path.basename(part)}：未找到 transfer.list')
                     continue
-                else:
-                    transfer = None
+                if not V.JM:
+                    display(f'是否分解: {os.path.basename(part)} [1/0]: ', 2, '')
+                    if input() != '1':
+                        continue
+                if flag == 2:
+                    decompress_bro(transfer, part)
+                elif flag == 3:
+                    decompress_dat(transfer, part)
+                continue
+
+            if os.path.basename(part) in ('dsp.img', 'cust.img'):
+                continue
+            if gettype.gettype(part) not in ('ext', 'sparse', 'erofs', 'super', 'boot', 'vendor_boot'):
+                continue
             if not V.JM:
                 display(f'是否分解: {os.path.basename(part)} [1/0]: ', 2, '')
                 if input() != '1':
                     continue
-            if flag == 2:
-                decompress_bro(transfer, part, part.rsplit('.', 1)[0])
-            elif flag == 3:
-                decompress_dat(transfer, part, part.rsplit('.', 2)[0] + '.img')
-            continue
-        if flag == 4 and os.path.basename(part) in ('dsp.img', 'cust.img'):
-            continue
-        if gettype.gettype(part) not in ('ext', 'sparse', 'erofs', 'super', 'boot', 'vendor_boot'):
-            continue
-        if not V.JM:
-            display(f'是否分解: {os.path.basename(part)} [1/0]: ', 2, '')
-            if input() != '1':
-                continue
-        decompress_img(part, V.main_dir + os.path.basename(part).rsplit('.', 1)[0])
+            decompress_img(part, workspace_partition(partition_name(part)))
+        except LayoutError as error:
+            print(f'> 跳过 {os.path.basename(part)}: {error}')
 
 
 def envelop_project():
-    after = "DNA"
-    V.main_dir = PWD_DIR + V.project + os.sep
-    V.input = V.main_dir + after + "_input" + os.sep
-    V.config = V.main_dir + after + "_config" + os.sep
-    V.out = V.main_dir + after + "_out" + os.sep
-    if not os.path.isdir(V.input):
-        os.makedirs(V.input)
-    if not os.path.isdir(V.out):
-        os.makedirs(V.out)
-    if not os.path.isdir(V.main_dir):
-        os.makedirs(V.main_dir)
+    project_name = os.path.basename(os.path.normpath(V.project))
+    ProjectLayout.validate_component(project_name, "工程")
+    V.project = project_name
+    V.layout = ProjectLayout(os.path.join(PWD_DIR, project_name)).initialize()
+    V.project_dir = str(V.layout.project_dir) + os.sep
+    V.input = str(V.layout.input_dir) + os.sep
+    V.out = str(V.layout.out_dir) + os.sep
+    V.workspace = str(V.layout.workspace_dir) + os.sep
+    V.config = str(V.layout.config_dir) + os.sep
+    V.tmp = str(V.layout.tmp_dir) + os.sep
+    V.boot_work = str(V.layout.tmp_dir / 'bootimg') + os.sep
+    recover_pending_partition_commits()
+
+
+def safe_extract_zip(archive, destination):
+    """Extract a ZIP only after rejecting members that escape its destination."""
+    destination = Path(destination)
+    if destination.is_symlink() or not destination.is_dir():
+        raise LayoutError(f'ZIP 输出目录无效: {destination}')
+    destination = destination.resolve()
+    for member in archive.infolist():
+        mode = (member.external_attr >> 16) & 0xFFFF
+        if stat.S_ISLNK(mode) or stat.S_ISCHR(mode) or stat.S_ISBLK(mode) or stat.S_ISFIFO(mode):
+            raise LayoutError(f'ZIP 不支持链接或特殊文件: {member.filename}')
+        target = (destination / member.filename).resolve()
+        try:
+            target.relative_to(destination)
+        except ValueError as error:
+            raise LayoutError(f'ZIP 包含越界路径: {member.filename}') from error
+    archive.extractall(destination)
+
+
+def _find_imported_files(import_dir, pattern):
+    return sorted(glob(os.path.join(import_dir, '**', pattern), recursive=True))
 
 
 def extract_zrom(rom):
-    if zipfile.is_zipfile(rom):
-        V.project = 'DNA_' + os.path.basename(rom).rsplit('.', 1)[0]
-        fantasy_zip = zipfile.ZipFile(rom)
-        zip_lists = fantasy_zip.namelist()
-    else:
+    if not zipfile.is_zipfile(rom):
         input('> 破损的zip或不支持的zip类型')
         return
-    if 'payload.bin' in zip_lists:
-        print(f'> 解压缩: {os.path.basename(rom)}')
-        envelop_project()
-        fantasy_zip.close()
-        if os.path.isfile(V.input + 'payload.bin'):
-            decompress_bin(fantasy_zip.extract('payload.bin', V.input), V.input,
-                           input(f'> {RED}选择提取方式:  [0]全盘提取  [1]指定镜像{CLOSE} >> '))
-            menu_main()
-    elif 'run.sh' in zip_lists:
-        if not os.path.isdir(MOD_DIR):
-            os.makedirs(MOD_DIR)
-        mod_name = os.path.basename(rom).rsplit('.', 1)[0].replace(' ', '_')
-        sub_dir = MOD_DIR + 'DNA_' + mod_name
-        if not os.path.isdir(sub_dir):
-            display(f'是否安装插件: {mod_name} ? [1/0]: ', 2, '')
-        else:
-            display(f'已安装插件: {mod_name}，是否删除原插件后安装 ? [0/1]: ', 2, '')
-        if input() == '1':
-            rmdire(sub_dir)
-            fantasy_zip.extractall(sub_dir)
-            fantasy_zip.close()
-            if os.path.isfile(sub_dir + os.sep + 'run.sh'):
-                change_permissions_recursive(sub_dir, 0o777)
-                print('\x1b[1;31m\n 安装完成 !!!\x1b[0m')
+
+    with zipfile.ZipFile(rom) as archive:
+        zip_lists = archive.namelist()
+        if 'run.sh' in zip_lists:
+            if not os.path.isdir(MOD_DIR):
+                os.makedirs(MOD_DIR)
+            mod_name = os.path.basename(rom).rsplit('.', 1)[0].replace(' ', '_')
+            sub_dir = MOD_DIR + 'DNA_' + mod_name
+            if not os.path.isdir(sub_dir):
+                display(f'是否安装插件: {mod_name} ? [1/0]: ', 2, '')
             else:
+                display(f'已安装插件: {mod_name}，是否删除原插件后安装 ? [0/1]: ', 2, '')
+            if input() == '1':
                 rmdire(sub_dir)
-                print('\x1b[1;31m\n 安装失败 !!!\x1b[0m')
-    else:
-        able = 5
-        infile = []
-        print(f'> 解压缩: {os.path.basename(rom)}')
-        envelop_project()
-        fantasy_zip.extractall(V.input)
-        fantasy_zip.close()
-        if [part_name for part_name in sorted(zip_lists) if part_name.endswith(".new.dat.br")]:
-            infile = glob(V.input + '*.br')
-            able = 2
-        elif [part_name for part_name in zip_lists if part_name.endswith(".new.dat")]:
-            infile = glob(V.input + '*.dat')
-            able = 3
-        elif [part_name for part_name in zip_lists if part_name.endswith(".img")]:
-            infile = glob(V.input + '*.img')
-            able = 4
-        if not infile:
-            input('> 仅支持含有payload.bin/*.new.dat/*.new.dat.br/*.img的zip固件')
-        else:
-            quiet()
-            decompress(infile, able)
+                os.makedirs(sub_dir, exist_ok=True)
+                try:
+                    safe_extract_zip(archive, sub_dir)
+                except LayoutError as error:
+                    rmdire(sub_dir)
+                    input(f'> 插件安装失败: {error}')
+                    return
+                if os.path.isfile(sub_dir + os.sep + 'run.sh'):
+                    change_permissions_recursive(sub_dir, 0o777)
+                    print('\x1b[1;31m\n 安装完成 !!!\x1b[0m')
+                else:
+                    rmdire(sub_dir)
+                    print('\x1b[1;31m\n 安装失败 !!!\x1b[0m')
+            return
+
+        V.project = 'DNA_' + os.path.basename(rom).rsplit('.', 1)[0]
+        try:
+            envelop_project()
+        except (LayoutError, UnsupportedLayoutError) as error:
+            input(f'> 无法创建或打开工程: {error}')
+            return
+
+        import_dir = stage_dir('import')
+        print(f'> 解压缩: {os.path.basename(rom)} 到 WORKSPACE/.tmp')
+        try:
+            safe_extract_zip(archive, import_dir)
+        except LayoutError as error:
+            input(f'> ROM ZIP 解压失败: {error}')
+            return
+
+    payload_files = _find_imported_files(import_dir, 'payload.bin')
+    if payload_files:
+        decompress_bin(
+            payload_files[0],
+            flag=input(f'> {RED}选择提取方式:  [0]全盘提取  [1]指定镜像{CLOSE} >> '),
+        )
         menu_main()
+        return
+
+    if _find_imported_files(import_dir, '*.new.dat.br'):
+        infile, able = _find_imported_files(import_dir, '*.new.dat.br'), 2
+    elif _find_imported_files(import_dir, '*.new.dat'):
+        infile, able = _find_imported_files(import_dir, '*.new.dat'), 3
+    elif _find_imported_files(import_dir, '*.img'):
+        infile, able = _find_imported_files(import_dir, '*.img'), 4
+    else:
+        input('> 仅支持含有payload.bin/*.new.dat/*.new.dat.br/*.img的zip固件')
+        menu_main()
+        return
+
+    quiet()
+    decompress(infile, able)
+    menu_main()
 
 
 def lists_project(dTitle, sPath, flag):
@@ -1306,18 +2047,25 @@ def creat_project():
     os.system("clear")
     print("\x1b[1;31m> 新建工程:\x1b[0m\n")
     creat_name = input("  输入名称【不能有空格、特殊符号】: DNA_").strip().rstrip("\\").replace(" ", "_")
-    if creat_name:
-        V.project = "DNA_" + creat_name
-        if not os.path.isdir(V.project):
-            os.mkdir(V.project)
-            envelop_project()
-            menu_main()
-        else:
-            input(f"\x1b[0;31m\n 工程目录< \x1b[0;32m{V.project} \x1b[0;31m>已存在, 回车返回 ...\x1b[0m\n")
-            del V.project
-            creat_project()
-    else:
-        menu_once()
+    if not creat_name:
+        return
+
+    V.project = "DNA_" + creat_name
+    try:
+        ProjectLayout.validate_component(V.project, "工程")
+    except LayoutError as error:
+        input(f"> 工程名称无效: {error}")
+        return
+    if os.path.exists(os.path.join(PWD_DIR, V.project)):
+        input(f"\x1b[0;31m\n 工程目录< \x1b[0;32m{V.project} \x1b[0;31m>已存在, 回车返回 ...\x1b[0m\n")
+        return
+
+    try:
+        envelop_project()
+    except (LayoutError, UnsupportedLayoutError) as error:
+        input(f"> 创建工程失败: {error}")
+        return
+    return True
 
 
 def menu_once():
@@ -1344,7 +2092,7 @@ def menu_once():
                                 f"\x1b[0;31m> 是否删除 \x1b[0;34mNo.{which} \x1b[0;31m工程: \x1b[0;32m{os.path.basename(V.dict0[int(which)])}\x1b[0;31m [0/1]:\x1b[0m ") == "1":
                             if os.path.isdir(V.dict0[int(which)]):
                                 rmdire(V.dict0[int(which)])
-                                menu_once()
+                                continue
                     input(f"> Number {which} Error !")
         elif int(choice) == 66:
             download_zrom()
@@ -1352,13 +2100,18 @@ def menu_once():
             env_setup()
             load_setup_json()
         elif int(choice) == 0:
-            creat_project()
-            break
+            if creat_project():
+                menu_main()
+            continue
         elif 0 < int(choice) < len(V.dict0):
             V.project = V.dict0[int(choice)]
-            envelop_project()
+            try:
+                envelop_project()
+            except (LayoutError, UnsupportedLayoutError) as error:
+                input(f'> 无法打开工程: {error}')
+                continue
             menu_main()
-            break
+            continue
         else:
             input(f"> Number \x1b[0;33m{choice}\x1b[0m enter error !")
 
@@ -1392,7 +2145,7 @@ def menu_more():
                 kill_dm()
         elif int(option) == 3:
             with CoastTime():
-                devdex.deodex(V.project)
+                devdex.deodex(V.workspace)
         elif int(option) == 4:
             add_dir = f"{PWD_DIR}local/etc/devices/{V.SETUP_MANIFEST['DEVICE_CODE']}/{V.SETUP_MANIFEST['ANDROID_SDK']}"
             if os.path.isfile(f"{add_dir}/reduce.txt"):
@@ -1404,15 +2157,21 @@ def menu_more():
                 input("精简列表<reduce.txt>丢失！")
                 continue
             with CoastTime():
-                for line in open(reduce_conf):
-                    line = line.replace("/", os.sep).strip()
-                    if not line.startswith("#") and line:
-                        if os.path.exists(V.main_dir + line):
-                            print(line)
-                            try:
-                                shutil.rmtree(V.main_dir + line)
-                            except NotADirectoryError:
-                                os.remove(V.main_dir + line)
+                for line in open(reduce_conf, encoding='utf-8'):
+                    line = line.replace('/', os.sep).strip()
+                    if line.startswith('#') or not line:
+                        continue
+                    try:
+                        target = workspace_relative_path(line)
+                    except LayoutError as error:
+                        print(f'> 跳过越界精简路径 {line}: {error}')
+                        continue
+                    if target.exists():
+                        print(line)
+                        try:
+                            shutil.rmtree(target)
+                        except NotADirectoryError:
+                            target.unlink()
         elif int(option) == 5:
             with CoastTime():
                 patch_addons()
@@ -1465,7 +2224,7 @@ def menu_modules():
             os.system("clear")
             print(f"\x1b[1;31m> 执行插件:\x1b[0m {os.path.basename(V.dict0[int(choice)])}\n")
             if os.path.isfile(shell_sub := (V.dict0[int(choice)] + os.sep + "run.sh")):
-                call(f"busybox bash {shell_sub} {V.main_dir.replace(os.sep, '/')}")
+                call(['busybox', 'bash', shell_sub, V.workspace.replace(os.sep, '/')])
             input('> 任意键继续')
         else:
             print(f"> Number \x1b[0;33m{choice}\x1b[0m enter error !")
@@ -1479,29 +2238,33 @@ menu_actions = {
     55: lambda: input(
         "Github: https://github.com/ColdWindScholar/D.N.A3/\nWrote By ColdWindScholar (3590361911@qq.com)"),
     88: sys.exit,
-    0: menu_once,
     7: menu_modules,
     6: menu_more
 }
 
 
 def menu_main():
+    """Run the project menu iteratively so long sessions do not grow the call stack."""
     V.JM = True
-    os.system("clear")
-    print(f'\x1b[1;36m> 当前工程: \x1b[0m{V.project}')
-    print('-------------------------------------------------------\n')
-    print('\x1b[0;31m\t  0> 选择[etc]          1> 分解[bin]\x1b[0m\n')
-    print('\x1b[0;32m\t  2> 分解[bro]          3> 分解[dat]\x1b[0m\n')
-    print('\x1b[0;36m\t  4> 分解[img]          5> 分解[win]\x1b[0m\n')
-    print('\x1b[0;33m\t  6> 更多[dev]          7> 插件[sub]\x1b[0m\n')
-    print('\x1b[0;35m\t  8> 合成[img]          9> 合成[dat]\x1b[0m\n')
-    print('\x1b[0;34m\t  10> 合成[bro]         88> 退出[bye]\x1b[0m\n')
-    print('-------------------------------------------------------')
-    option = input(f'> {RED}输入序号{CLOSE} >> ')
-    if not option.isdigit():
-        input('> 输入序号数字')
-    else:
-        if int(option) in menu_actions.keys():
+    while True:
+        os.system("clear")
+        print(f'\x1b[1;36m> 当前工程: \x1b[0m{V.project}')
+        print('-------------------------------------------------------\n')
+        print('\x1b[0;31m\t  0> 选择[etc]          1> 分解[bin]\x1b[0m\n')
+        print('\x1b[0;32m\t  2> 分解[bro]          3> 分解[dat]\x1b[0m\n')
+        print('\x1b[0;36m\t  4> 分解[img]          5> 分解[win]\x1b[0m\n')
+        print('\x1b[0;33m\t  6> 更多[dev]          7> 插件[sub]\x1b[0m\n')
+        print('\x1b[0;35m\t  8> 合成[img]          9> 合成[dat]\x1b[0m\n')
+        print('\x1b[0;34m\t  10> 合成[bro]         88> 退出[bye]\x1b[0m\n')
+        print('-------------------------------------------------------')
+        option = input(f'> {RED}输入序号{CLOSE} >> ')
+        if not option.isdigit():
+            input('> 输入序号数字')
+            continue
+
+        if int(option) == 0:
+            return
+        if int(option) in menu_actions:
             menu_actions[int(option)]()
         elif int(option) == 1:
             infile = V.input + 'payload.bin'
@@ -1524,7 +2287,7 @@ def menu_main():
             if int(option) == 8:
                 for file in glob(V.config + '*_kernel.txt'):
                     f_basename = os.path.basename(file).rsplit('_', 1)[0]
-                    source = V.main_dir + f_basename
+                    source = workspace_partition(f_basename)
                     if os.path.isdir(source):
                         if not V.JM:
                             display(f'是否合成: {f_basename}.img [1/0]: ', end='')
@@ -1533,7 +2296,7 @@ def menu_main():
                         boot_utils(source, V.out, 2)
             for file in glob(V.config + '*_contexts.txt'):
                 f_basename = os.path.basename(file).rsplit('_', 1)[0]
-                source = V.main_dir + f_basename
+                source = workspace_partition(f_basename)
                 if os.path.isdir(source):
                     fsconfig = V.config + f_basename + '_fsconfig.txt'
                     contexts = V.config + f_basename + '_contexts.txt'
@@ -1557,5 +2320,5 @@ def menu_main():
                         recompress(source, fsconfig, contexts, infojson, int(option))
         else:
             input(f'\x1b[0;33m{option}\x1b[0m enter error !')
+            continue
         input('> 任意键继续')
-    menu_main()

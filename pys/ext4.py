@@ -916,7 +916,7 @@ class BlockReader:
         end_block_idx = (self.cursor + byte_len - 1) // self.volume.block_size
         end_of_stream_check = byte_len
 
-        blocks = [self.read_block(i) for i in range(start_block_idx, end_block_idx - start_block_idx + 1)]
+        blocks = [self.read_block(i) for i in range(start_block_idx, end_block_idx + 1)]
 
         start_offset = self.cursor % self.volume.block_size
         if start_offset != 0:
