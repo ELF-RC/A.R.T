@@ -3,12 +3,20 @@ import errno
 import glob
 import os
 import pathlib
+import platform
 import shutil
 import subprocess
 import sys
 import tempfile
 import traceback
 import zipfile
+
+_BIN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'local', 'bin', platform.system(), platform.machine()) + os.sep
+
+
+def _bin(name):
+    candidate = os.path.join(_BIN_PATH, name)
+    return candidate if os.path.isfile(candidate) else name
 
 
 class DeodexException(Exception):
@@ -71,13 +79,13 @@ def find_optimized_files(path):
 
 
 def deodex_vdex(vdex, temp_dir):
-    subprocess.run(['vdexExtractor', '-i', vdex, '-o', temp_dir, '-v', '2'], check=True)
+    subprocess.run([_bin('vdexExtractor'), '-i', vdex, '-o', temp_dir, '-v', '2'], check=True)
 
 
 def zipalign(path):
-    if subprocess.run(['zipalign', '-c', '4', path]).returncode != 0:
+    if subprocess.run([_bin('zipalign'), '-c', '4', path]).returncode != 0:
         output_path = path + '.zipaligned'
-        subprocess.run(['zipalign', '4', path, output_path], check=True)
+        subprocess.run([_bin('zipalign'), '4', path, output_path], check=True)
         os.rename(output_path, path)
 
 

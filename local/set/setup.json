@@ -7,6 +7,8 @@
     "REPACK_TO_RW": "0",
     "RESIZE_IMG": "0",
     "RESIZE_EROFSIMG": "1",
+    "EROFS_LEVEL": "1",
+    "EROFS_OLD_KERNEL": "0",
     "REPACK_SPARSE_IMG": "0",
     "REPACK_BR_LEVEL": "3",
     "SUPER_SIZE": "9126805504",

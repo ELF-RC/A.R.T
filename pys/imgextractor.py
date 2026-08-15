@@ -168,6 +168,16 @@ class ULTRAMAN(object):
         except:
             pass
 
+    def __fix_size(self):
+        """Expand a truncated EXT4 image to the size recorded in its superblock."""
+        orig_size = os.path.getsize(self.OUTPUT_IMAGE_FILE)
+        with open(self.OUTPUT_IMAGE_FILE, 'rb+') as file:
+            volume = ext4.Volume(file)
+            real_size = volume.get_block_count * volume.block_size
+            if orig_size < real_size:
+                print(f'> EXT4 镜像被截断，扩展: {orig_size} -> {real_size}')
+                file.truncate(real_size)
+
     def MONSTER(self, target, output_dir):
         output_dir = Path(output_dir)
         if output_dir.is_symlink() or not output_dir.is_dir():
@@ -186,6 +196,7 @@ class ULTRAMAN(object):
             moto = re.search(b'MOTO', stream.read(500000))
         if moto:
             self.FIX_MOTO(os.path.abspath(self.OUTPUT_IMAGE_FILE))
+        self.__fix_size()
         self.EXT4_EXTRACTOR()
         return True
 
@@ -435,9 +446,11 @@ class ULTRAMAN(object):
             root_context = None
             for context in self.contexts:
                 fields = context.split(maxsplit=1)
-                if len(fields) == 2 and 'lost..found' in fields[0]:
+                if len(fields) == 2 and re.search(r'lost.{2}found', context):
                     root_context = fields[1]
                     break
+            if not root_context:
+                root_context = 'u:object_r:rootfs:s0'
             if root_context:
                 self.contexts.insert(0, f'/ {root_context}')
                 self.contexts.insert(1, f'/{partition_name}(/.*)? {root_context}')

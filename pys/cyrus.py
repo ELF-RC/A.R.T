@@ -48,7 +48,7 @@ class GlobalValue(object):
     JM = False
 
     def __init__(self):
-        self.programs = ["mv", "cpio", "brotli", "img2simg", "e2fsck", "resize2fs",
+        self.programs = ["cpio", "brotli", "img2simg", "e2fsck", "resize2fs",
                          "mke2fs", "e2fsdroid", "mkfs.erofs", "lpmake", "extract.erofs", "magiskboot"]
 
     def __getattr__(self, item):
@@ -262,6 +262,8 @@ def env_setup():
         '合成EXT4动态分区状态[0:RO/1:RW]': "REPACK_TO_RW",
         '合成EXT4压缩分区空间[0/1]': "RESIZE_IMG",
         '合成EROFS压缩算法[0:NO/1:LZ4HC/2:LZ4]': "RESIZE_EROFSIMG",
+        'EROFS压缩等级[1]': "EROFS_LEVEL",
+        'EROFS旧内核兼容[0/1]': "EROFS_OLD_KERNEL",
         '压缩BROTLI等级[0-9|3]': "REPACK_BR_LEVEL",
         '动态分区簇名称[qti_dynamic_partitions]': "GROUP_NAME",
         '动态SUPER分区总大小[9126805504]': "SUPER_SIZE",
@@ -1139,56 +1141,32 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
             mount_point = "/"
     if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "0":
         fs_variant = "ext4"
-        if (V.SETUP_MANIFEST["REPACK_TO_RW"] == "1" and V.SETUP_MANIFEST["IS_DYNAMIC"] == "1") or not fsize:
-            resize2_rw = True
+        block_size = 4096
+        blocks = ceil(int(size) / int(block_size))
+        if not fsize:
             read = "rw"
-            block_size = 4096
-            blocks = ceil(int(size) / int(block_size))
-            mkimage_cmd = [
-                'make_ext4fs', '-J', '-T', str(timestamp), '-S', contexts, '-C', fsconfig,
-                '-l', str(size), '-L', label, '-a', f'/{label}', distance, source,
-            ]
-            mke2fs_a_cmd = [
-                'mke2fs', '-O', '^has_journal,^metadata_csum,extent,huge_file,^flex_bg,^64bit,uninit_bg,dir_nlink,extra_isize',
-                '-L', label, '-I', '256', '-M', mount_point, '-m', '0', '-t', 'ext4', '-b', str(block_size),
-                distance, str(blocks),
-            ]
-            e2fsdroid_a_cmd = [
-                'e2fsdroid', '-e', '-T', str(timestamp), '-S', contexts, '-C', fsconfig,
-                '-a', f'/{label}', '-f', source, distance,
-            ]
-        else:
-            size = fsize
-            if int(V.SETUP_MANIFEST["ANDROID_SDK"]) <= 9:
-                read = "rw"
-                mkimage_cmd = [
-                    'make_ext4fs', '-J', '-T', str(timestamp), '-S', contexts, '-C', fsconfig,
-                    '-l', str(size), '-L', label, '-a', f'/{label}', distance, source,
-                ]
-            else:
-                mkimage_cmd = [
-                    'make_ext4fs', '-T', str(timestamp), '-S', contexts, '-C', fsconfig,
-                    '-l', str(size), '-L', label, '-a', f'/{label}', distance, source,
-                ]
-            mke2fs_a_cmd = [
-                'mke2fs', '-O', '^has_journal,^metadata_csum,extent,huge_file,^flex_bg,^64bit,uninit_bg,dir_nlink,extra_isize',
-                '-L', label, '-I', '256', '-N', str(inodes), '-M', mount_point, '-m', '0', '-g', str(per_group),
-                '-t', 'ext4', '-b', str(block_size), distance, str(blocks),
-            ]
-            e2fsdroid_a_cmd = [
-                'e2fsdroid', '-e', '-T', str(timestamp), '-S', contexts, '-C', fsconfig,
-                '-a', f'/{label}', '-f', source, '-s', distance,
-            ]
+        new_distance = V.out + label + "_new.img"
+        if os.path.isfile(new_distance):
+            os.remove(new_distance)
+        mke2fs_a_cmd = [
+            'mke2fs', '-O', '^has_journal,^metadata_csum,extent,huge_file,^flex_bg,^64bit,uninit_bg,dir_nlink,extra_isize',
+            '-L', label, '-I', '256', '-M', mount_point, '-m', '0', '-t', 'ext4', '-b', str(block_size),
+            new_distance, str(blocks),
+        ]
+        e2fsdroid_a_cmd = [
+            'e2fsdroid', '-e', '-T', str(timestamp), '-S', contexts, '-C', fsconfig,
+            '-a', f'/{label}', '-f', source, new_distance,
+        ]
     else:
         fs_variant = "erofs"
+        erofs_level = V.SETUP_MANIFEST.get("EROFS_LEVEL", "1")
+        erofs_format = "lz4hc" if V.SETUP_MANIFEST["RESIZE_EROFSIMG"] == "1" else "lz4"
+        erofs_compress = f'{erofs_format},{erofs_level}' if erofs_format != 'lz4' else erofs_format
         mkerofs_cmd = ['mkfs.erofs']
-        if not re.match("5.3", platform.uname().release):
+        if V.SETUP_MANIFEST.get("EROFS_OLD_KERNEL", "0") == "1":
             mkerofs_cmd.extend(['-E', 'legacy-compress'])
-        if V.SETUP_MANIFEST["RESIZE_EROFSIMG"] == "1":
-            mkerofs_cmd.append('-zlz4hc,1')
-        elif V.SETUP_MANIFEST["RESIZE_EROFSIMG"] == "2":
-            mkerofs_cmd.append('-zlz4,1')
         mkerofs_cmd.extend([
+            f'-z{erofs_compress}',
             '-T', str(timestamp),
             f'--mount-point=/{label}',
             f'--product-out={V.workspace}',
@@ -1216,27 +1194,30 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
                 os.remove(distance)
             except:
                 pass
-    elif int(V.SETUP_MANIFEST["ANDROID_SDK"]) <= 9:
-        call(mkimage_cmd)
+        else:
+            print(" Done")
     else:
         call(mke2fs_a_cmd)
-        if os.path.isfile(distance):
+        if os.path.isfile(new_distance):
             if call(e2fsdroid_a_cmd) != 0:
                 try:
-                    os.remove(distance)
+                    os.remove(new_distance)
                 except:
                     pass
+        if os.path.isfile(new_distance):
+            print(" Done")
+            if V.SETUP_MANIFEST['REPACK_SPARSE_IMG'] == '1' or flag > 8:
+                display("开始转换: sparse format ...")
+                call(['img2simg', new_distance, distance])
+                try:
+                    os.remove(new_distance)
+                except:
+                    pass
+            else:
+                if os.path.isfile(distance):
+                    os.remove(distance)
+                os.rename(new_distance, distance)
     if os.path.isfile(distance):
-        print(" Done")
-        if resize2_rw:
-            call(['e2fsck', '-E', 'unshare_blocks', distance])
-            if dumpinfo:
-                if int(os.path.getsize(distance)) > int(fsize):
-                    call(['resize2fs', '-M', distance])
-                if V.SETUP_MANIFEST["RESIZE_IMG"] == "1":
-                    if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "0":
-                        if V.SETUP_MANIFEST["REPACK_TO_RW"] == "1":
-                            call(['resize2fs', '-M', distance])
         op_list = V.input + "dynamic_partitions_op_list"
         new_op_list = V.out + "dynamic_partitions_op_list"
         if os.path.isfile(op_list) or os.path.isfile(new_op_list):
@@ -1246,21 +1227,16 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
             CONTENT = "remove_all_groups\n"
             for slot in ('_a', '_b'):
                 CONTENT += f"add_group qti_dynamic_partitions{slot} {V.SETUP_MANIFEST['SUPER_SIZE']}\n"
-
             for partition in ('system', 'system_ext', 'product', 'vendor', 'odm'):
                 for slot in ('_a', '_b'):
                     CONTENT += f"add {partition}{slot} qti_dynamic_partitions{slot}\n"
-
             if V.SETUP_MANIFEST["IS_VAB"] == "1":
-                for partition in ('system_a', 'system_ext_a', 'product_a', 'vendor_a',
-                                  'odm_a'):
+                for partition in ('system_a', 'system_ext_a', 'product_a', 'vendor_a', 'odm_a'):
                     CONTENT += f"resize {partition} 2\n"
-
             else:
                 for partition in ('system', 'system_ext', 'product', 'vendor', 'odm'):
                     for slot in ('_a', '_b'):
                         CONTENT += f"resize {partition}{slot} 2\n"
-
             with open(new_op_list, "w", encoding="UTF-8", newline="\n") as ST:
                 ST.write(CONTENT)
         renew_size = os.path.getsize(distance)
@@ -1273,37 +1249,21 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
                     elif f"resize {label}_a " in line:
                         line = f"resize {label}_a {renew_size}\n"
                     f_w.write(line)
-
-        if flag > 8 or (V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1"):
-            display("开始转换: sparse format ...")
-            call(['img2simg', distance, distance.rsplit('.', 1)[0] + '_sparse.img'])
-            if os.path.exists(distance):
-                try:
-                    os.remove(distance)
-                except:
-                    pass
-            if os.path.isfile(distance.rsplit(".", 1)[0] + "_sparse.img"):
-                source_file = distance.rsplit(".", 1)[0] + "_sparse.img"
-                try:
-                    os.rename(source_file, distance)
-                except Exception as e:
-                    print("Error moving file:", e)
-                if flag > 8:
-                    display(f"重新生成: {label}.new.dat ...", 3)
-                    img2sdat.main(distance, V.out, 4, label)
-                    newdat = V.out + label + ".new.dat"
-                    if os.path.isfile(newdat):
-                        print(" Done")
-                        os.remove(distance)
-                        if flag == 10:
-                            level = V.SETUP_MANIFEST["REPACK_BR_LEVEL"]
-                            display(f"重新生成: {label}.new.dat.br | Level={level} ...", 3)
-                            newdat_brotli = newdat + ".br"
-                            call(['brotli', f'-{level}jfo', newdat_brotli, newdat])
-                            print(f" {GREEN}打包成功{CLOSE}" if os.path.isfile(
-                                newdat_brotli) else f" {RED}打包失败{CLOSE}")
-                    else:
-                        print(f" {RED}打包失败{CLOSE}")
+        if flag > 8:
+            display(f"重新生成: {label}.new.dat ...", 3)
+            img2sdat.main(distance, V.out, 4, label)
+            newdat = V.out + label + ".new.dat"
+            if os.path.isfile(newdat):
+                print(" Done")
+                os.remove(distance)
+                if flag == 10:
+                    level = V.SETUP_MANIFEST["REPACK_BR_LEVEL"]
+                    display(f"重新生成: {label}.new.dat.br | Level={level} ...", 3)
+                    newdat_brotli = newdat + ".br"
+                    call(['brotli', f'-{level}jfo', newdat_brotli, newdat])
+                    print(f" {GREEN}打包成功{CLOSE}" if os.path.isfile(newdat_brotli) else f" {RED}打包失败{CLOSE}")
+            else:
+                print(f" {RED}打包失败{CLOSE}")
     else:
         print(f" {RED}打包失败{CLOSE}")
 
@@ -2303,14 +2263,6 @@ def menu_main():
                     infojson = V.config + f_basename + '_info.txt'
                     if not os.path.isfile(infojson):
                         infojson = None
-                    if V.SETUP_MANIFEST['REPACK_EROFS_IMG'] == '0' and V.SETUP_MANIFEST['REPACK_TO_RW'] == '1':
-                        if V.SETUP_MANIFEST['REPACK_EROFS_IMG'] == '1':
-                            V.SETUP_MANIFEST['REPACK_EROFS_IMG'] = '0'
-                            V.SETUP_MANIFEST['REPACK_TO_RW'] = '1'
-                    elif V.SETUP_MANIFEST['REPACK_EROFS_IMG'] == '0' and V.SETUP_MANIFEST['REPACK_TO_RW'] == '0':
-                        if V.SETUP_MANIFEST['REPACK_EROFS_IMG'] == '1':
-                            V.SETUP_MANIFEST['REPACK_EROFS_IMG'] = '1'
-                            V.SETUP_MANIFEST['REPACK_TO_RW'] = '0'
                     if os.path.isfile(contexts) and os.path.isfile(fsconfig):
                         if not V.JM:
                             txts = {8: "img", 9: "new.dat", 10: "new.dat.br"}
