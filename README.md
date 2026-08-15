@@ -43,9 +43,12 @@ DNA_工程名/
 
 #### **构建**
 
-1.安装python3,pip
-2.pip install -r requirements.txt --break-system-packages (这里更推荐使用虚拟环境)
-3.执行./build.py构建
+1.安装python3,pip  
+
+2.pip install -r requirements.txt --break-system-packages (这里更推荐使用虚拟环境)  
+
+3.执行./build.py构建  
+
 
 #### **反馈**
 
