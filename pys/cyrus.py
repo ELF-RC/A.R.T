@@ -1543,18 +1543,24 @@ def menu_main():
         print('\x1b[0;36m\t  4> 分解[img]          5> 分解[win]\x1b[0m\n')
         print('\x1b[0;33m\t  6> 合成super          7> 插件[sub]\x1b[0m\n')
         print('\x1b[0;35m\t  8> 合成[img]          9> 合成[dat]\x1b[0m\n')
-        print('\x1b[0;34m\t  10> 合成[bro]         88> 退出[bye]\x1b[0m\n')
+        print('\x1b[0;34m\t  10> 合成[bro]        66> 退出工具\x1b[0m\n')
         print('-------------------------------------------------------')
         option = input(f'> {RED}输入序号{CLOSE} >> ')
         if not option.isdigit():
             input('> 输入序号数字')
             continue
 
-        if int(option) == 0:
+        option = int(option)
+        valid_options = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 55, 66, 88}
+        if option not in valid_options:
+            input(f'> 无效序号: {option}')
+            continue
+
+        if option == 0:
             return
-        if int(option) in menu_actions:
-            menu_actions[int(option)]()
-        elif int(option) == 1:
+        if option in menu_actions:
+            menu_actions[option]()
+        elif option == 1:
             infile = V.input + 'payload.bin'
             if not os.path.exists(infile):
                 input("未发现Payload.Bin")
