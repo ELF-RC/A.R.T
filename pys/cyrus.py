@@ -21,7 +21,6 @@ from rich import print as echo
 from rich.console import Console
 from rich.progress import Progress
 
-from pys import devdex
 from pys import dumper as extract_payload
 from pys import fspatch
 from pys import img2sdat
@@ -388,279 +387,6 @@ def workspace_relative_path(relative_path):
     if relative.parts and relative.parts[0] in {'config'}:
         raise LayoutError(f"不允许修改 WORKSPACE/{relative.parts[0]}")
     return V.layout.require_workspace_path(Path(V.workspace, relative))
-
-
-def kill_avb():
-    for tab in find_file(V.workspace, "^fstab.*?"):
-        print(f"> 解除AVB加密: {tab}")
-        with open(tab, "r") as sf:
-            details = re.sub("avb.*?,", "", sf.read())
-        details = re.sub(",avb,", ",", details)
-        details = re.sub(",avb_keys=.*", "", details)
-        with open(tab, "w") as tf:
-            tf.write(details)
-
-
-def kill_dm():
-    for tab in find_file(V.workspace, "^fstab.*?"):
-        print(f"> 解除DM加密: {tab}")
-        with open(tab, "r") as sf:
-            details = re.sub("forceencrypt=", "encryptable=", sf.read())
-        details = re.sub(",fileencryption=.*metadata_encryption", "", details)
-        with open(tab, "w") as tf:
-            tf.write(details)
-
-
-def patch_kernel(boot):
-    for dt in ('dtb', 'kernel_dtb', 'extra'):
-        if os.path.isfile(dt):
-            print(f"- Patch fstab in {dt}")
-            call(['magiskboot', 'dtb', dt, 'patch'])
-    if os.path.isfile('kernel'):
-        # Keep the MIO patch sequence and execute it once per boot image.
-        call([
-            'magiskboot', 'hexpatch', 'kernel',
-            '49010054011440B93FA00F71E9000054010840B93FA00F7189000054001840B91FA00F7188010054',
-            'A1020054011440B93FA00F7140020054010840B93FA00F71E0010054001840B91FA00F7181010054',
-        ])
-        call(['magiskboot', 'hexpatch', 'kernel', '821B8012', 'E2FF8F12'])
-        call([
-            'magiskboot', 'hexpatch', 'kernel',
-            '736B69705F696E697472616D667300',
-            '77616E745F696E697472616D667300',
-        ])
-    print("- Repacking boot image")
-    return call(['magiskboot', 'repack', boot])
-
-
-def _prepare_boot_work():
-    """Create a disposable boot work directory in system temp."""
-    boot_work = tempfile.mkdtemp(prefix='art-bootimg-')
-    V.boot_work = boot_work + os.sep
-    return V.boot_work
-
-
-def patch_twrp(bootimg):
-    ramdisk = (
-        f"{PWD_DIR}local/etc/devices/{V.SETUP_MANIFEST['DEVICE_CODE']}/"
-        f"{V.SETUP_MANIFEST['ANDROID_SDK']}/ramdisk.cpio"
-    )
-    if not (os.path.isfile(ramdisk) and os.path.isfile(bootimg)):
-        input(
-            f"> 未发现local/etc/devices/{V.SETUP_MANIFEST['DEVICE_CODE']}/"
-            f"{V.SETUP_MANIFEST['ANDROID_SDK']}/ramdisk.cpio文件"
-        )
-        return
-
-    work_dir = _prepare_boot_work()
-    staged_boot = os.path.join(work_dir, os.path.basename(bootimg))
-    output_boot = None
-    original_dir = os.getcwd()
-    try:
-        shutil.copy2(bootimg, staged_boot)
-        print("- Unpacking boot image")
-        os.chdir(work_dir)
-        if call(['magiskboot', 'unpack', str(staged_boot)]) != 0:
-            return
-        if not (os.path.isfile("kernel") and os.path.isfile("ramdisk.cpio")):
-            print("> boot 镜像缺少 kernel 或 ramdisk.cpio，无法注入 TWRP ramdisk")
-            return
-
-        print(f"- Replace ramdisk twrp@{V.SETUP_MANIFEST['ANDROID_SDK']}")
-        shutil.copy2(ramdisk, os.path.join(work_dir, "ramdisk.cpio"))
-        patch_kernel(staged_boot)
-        if not os.path.isfile("new-boot.img"):
-            print("> TWRP boot 回包失败")
-            return
-
-        os.makedirs(V.out, exist_ok=True)
-        output_boot = os.path.join(V.out, f"{Path(bootimg).stem}_twrp.img")
-        shutil.move(os.path.join(work_dir, "new-boot.img"), output_boot)
-        print(f"+ Done: {output_boot}")
-    finally:
-        os.chdir(original_dir)
-
-    if output_boot and input("> 是否继续添加Magisk [1/0]: ") == "1":
-        patch_magisk(output_boot)
-
-
-def patch_magisk(bootimg):
-    magisk_manifest = {}
-    if os.path.isfile(MAGISK_JSON):
-        with open(MAGISK_JSON, "r", encoding="utf-8") as manifest_file:
-            magisk_manifest = json.load(manifest_file)
-    default_manifest = {
-        'CLASS': "alpha",
-        'KEEPVERITY': "true",
-        'KEEPFORCEENCRYPT': "true",
-        'PATCHVBMETAFLAG': "false",
-        'TARGET': "arm",
-        'IS_64BIT': "true",
-    }
-    for property_, value in default_manifest.items():
-        magisk_manifest.setdefault(property_, value)
-
-    for key in ('KEEPVERITY', 'KEEPFORCEENCRYPT', 'PATCHVBMETAFLAG', 'IS_64BIT'):
-        if magisk_manifest[key] not in ('true', 'false'):
-            print(f"Invalid [{key}] - must be one of <true/false>")
-            return
-    if magisk_manifest['CLASS'].lower() not in ('stable', 'alpha', 'canary'):
-        print("Invalid [CLASS] - must be one of <stable/alpha/canary>")
-        return
-    if magisk_manifest['TARGET'] not in ('arm', 'arm64', 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'):
-        print("Invalid [TARGET] - must be one of <arm/x86>")
-        return
-    if not os.path.isfile(bootimg):
-        print(f"> 未找到 boot 镜像: {bootimg}")
-        return
-
-    magisk_files = glob(f"{PWD_DIR}local/etc/magisk/{magisk_manifest['CLASS']}/Magisk-*.apk")
-    if not magisk_files:
-        input(f"> 未发现local/etc/magisk/{magisk_manifest['CLASS']}/Magisk-*.apk文件")
-        return
-    magisk_file = max(magisk_files, key=os.path.getmtime)
-    work_dir = _prepare_boot_work()
-    staged_boot = os.path.join(work_dir, os.path.basename(bootimg))
-    original_dir = os.getcwd()
-
-    try:
-        shutil.copy2(bootimg, staged_boot)
-        print("- Unpacking boot image")
-        os.chdir(work_dir)
-        if call(['magiskboot', 'unpack', str(staged_boot)]) != 0:
-            return
-        if not (os.path.isfile('kernel') and os.path.isfile('ramdisk.cpio')):
-            print("> boot 镜像缺少 kernel 或 ramdisk.cpio，无法修补 Magisk")
-            return
-
-        sha1_ = sha1()
-        with open(staged_boot, 'rb') as source_file:
-            for block in iter(lambda: source_file.read(2048), b''):
-                sha1_.update(block)
-        sha1_value = sha1_.digest().hex()
-        shutil.copy2(staged_boot, os.path.join(work_dir, 'stock_boot.img'))
-        shutil.copy2('ramdisk.cpio', 'ramdisk.cpio.orig')
-
-        configs = (
-            f"KEEPVERITY={magisk_manifest['KEEPVERITY']}\n"
-            f"KEEPFORCEENCRYPT={magisk_manifest['KEEPFORCEENCRYPT']}\n"
-            f"PATCHVBMETAFLAG={magisk_manifest['PATCHVBMETAFLAG']}\n"
-            f"RECOVERYMODE={str(os.path.isfile('recovery_dtbo')).lower()}\n"
-            f"SHA1={sha1_value}"
-        )
-        with open('config', 'w', encoding='utf-8', newline='\n') as config_file:
-            config_file.write(configs)
-
-        is_64bit = magisk_manifest['IS_64BIT'] == 'true'
-        target = magisk_manifest['TARGET']
-        magisk_entries = {
-            'magiskinit': 'lib/armeabi-v7a/libmagiskinit.so',
-            'magisk32': 'lib/armeabi-v7a/libmagisk32.so',
-            'magisk64': '',
-        }
-        if target in ('arm64', 'arm64-v8a') and is_64bit:
-            magisk_entries['magiskinit'] = 'lib/arm64-v8a/libmagiskinit.so'
-            magisk_entries['magisk64'] = 'lib/arm64-v8a/libmagisk64.so'
-        elif target in ('x86', 'x86_64'):
-            magisk_entries['magiskinit'] = 'lib/x86/libmagiskinit.so'
-            magisk_entries['magisk32'] = 'lib/x86/libmagisk32.so'
-            if is_64bit:
-                magisk_entries['magiskinit'] = 'lib/x86_64/libmagiskinit.so'
-                magisk_entries['magisk64'] = 'lib/x86_64/libmagisk64.so'
-
-        with zipfile.ZipFile(magisk_file) as magisk_zip:
-            zip_names = set(magisk_zip.namelist())
-            for output_name, archive_name in magisk_entries.items():
-                if archive_name and archive_name in zip_names:
-                    extracted = magisk_zip.extract(archive_name, work_dir)
-                    shutil.move(extracted, os.path.join(work_dir, output_name))
-
-        if not (os.path.isfile('magiskinit') and os.path.isfile('magisk32')):
-            print('> Magisk APK 缺少必要的 magiskinit 或 magisk32 库')
-            return
-        if call(['magiskboot', 'compress=xz', 'magisk32', 'magisk32.xz']) != 0:
-            return
-        if is_64bit and call(['magiskboot', 'compress=xz', 'magisk64', 'magisk64.xz']) != 0:
-            return
-
-        print(f"- Patching ramdisk magisk@{magisk_manifest['CLASS']}")
-        patch_args = [
-            'magiskboot', 'cpio', 'ramdisk.cpio',
-            'add 0750 init magiskinit',
-            'mkdir 0750 overlay.d',
-            'mkdir 0750 overlay.d/sbin',
-            'add 0644 overlay.d/sbin/magisk32.xz magisk32.xz',
-        ]
-        if is_64bit:
-            patch_args.append('add 0644 overlay.d/sbin/magisk64.xz magisk64.xz')
-        patch_args.extend([
-            'patch',
-            'backup ramdisk.cpio.orig',
-            'mkdir 000 .backup',
-            'add 000 .backup/.magisk config',
-        ])
-        if call(patch_args) != 0:
-            return
-        patch_kernel(staged_boot)
-        if not os.path.isfile('new-boot.img'):
-            print('> Magisk boot 回包失败')
-            return
-
-        os.makedirs(V.out, exist_ok=True)
-        output_image = os.path.join(V.out, f'{Path(bootimg).stem}_magisk.img')
-        shutil.move(os.path.join(work_dir, 'new-boot.img'), output_image)
-        print(f'+ Done: {output_image}')
-
-        system_target = Path(V.workspace) / 'system' / 'system'
-        vendor_target = Path(V.workspace) / 'vendor'
-        if system_target.is_dir():
-            apk_target = system_target / 'data-app' / 'Magisk' / 'Magisk.apk'
-        elif vendor_target.is_dir():
-            apk_target = vendor_target / 'data-app' / 'Magisk' / 'Magisk.apk'
-        else:
-            apk_target = None
-        if apk_target:
-            apk_target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(magisk_file, apk_target)
-    finally:
-        os.chdir(original_dir)
-
-
-def patch_addons():
-    addon_roots = [
-        (
-            'default',
-            os.path.join(
-                PWD_DIR,
-                'local',
-                'etc',
-                'devices',
-                'default',
-                V.SETUP_MANIFEST['ANDROID_SDK'],
-                'addons',
-            ),
-        ),
-        (
-            V.SETUP_MANIFEST['DEVICE_CODE'],
-            os.path.join(
-                PWD_DIR,
-                'local',
-                'etc',
-                'devices',
-                V.SETUP_MANIFEST['DEVICE_CODE'],
-                V.SETUP_MANIFEST['ANDROID_SDK'],
-                'addons',
-            ),
-        ),
-    ]
-    for device, source_dir in addon_roots:
-        if not os.path.isdir(source_dir):
-            continue
-        display(f"复制 {device}/{V.SETUP_MANIFEST['ANDROID_SDK']}/* 到 WORKSPACE ...")
-        try:
-            shutil.copytree(source_dir, V.workspace, dirs_exist_ok=True)
-        except Exception as error:
-            print("Error copying files:", error)
 
 
 def _super_partitions_in_out():
@@ -1712,81 +1438,11 @@ def menu_once():
             input(f"> Number \x1b[0;33m{choice}\x1b[0m enter error !")
 
 
-def menu_more():
-    while True:
-        os.system("clear")
-        print(f"\x1b[1;36m> 当前工程: \x1b[0m{V.project}")
-        print("-------------------------------------------------------\n")
-        print("\x1b[0;31m  0> 返回上级    \x1b[0m")
-        print("\x1b[0;32m  1> 去除AVB    \x1b[0m")
-        print("\x1b[0;34m  2> 去除DM     \x1b[0m")
-        print("\x1b[0;31m  3> [A11+]全局合并dev    \x1b[0m")
-        print("\x1b[0;35m  4> 标准精简    \x1b[0m")
-        print("\x1b[0;32m  5> 添加文件    \x1b[0m")
-        print("\x1b[0;34m  6> 修补boot.img @twrp    \x1b[0m")
-        print("\x1b[0;36m  7> 修补boot.img @magisk    \x1b[0m")
-        print("\x1b[0;33m  8> 合成super.img    \x1b[0m\n")
-        print("-------------------------------------------------------")
-        option = input(f"> {RED}输入序号{CLOSE} >> ")
-        if not option.isdigit():
-            input("> 输入序号数字")
-            continue
-        if int(option) == 0:
-            break
-        elif int(option) == 1:
-            with CoastTime():
-                kill_avb()
-        elif int(option) == 2:
-            with CoastTime():
-                kill_dm()
-        elif int(option) == 3:
-            with CoastTime():
-                devdex.deodex(V.workspace)
-        elif int(option) == 4:
-            add_dir = f"{PWD_DIR}local/etc/devices/{V.SETUP_MANIFEST['DEVICE_CODE']}/{V.SETUP_MANIFEST['ANDROID_SDK']}"
-            if os.path.isfile(f"{add_dir}/reduce.txt"):
-                reduce_conf = f"{add_dir}/reduce.txt"
-            elif os.path.isfile(
-                    f"{PWD_DIR}local/etc/devices/default/{V.SETUP_MANIFEST['ANDROID_SDK']}/reduce.txt"):
-                reduce_conf = f"{PWD_DIR}local/etc/devices/default/{V.SETUP_MANIFEST['ANDROID_SDK']}/reduce.txt"
-            else:
-                input("精简列表<reduce.txt>丢失！")
-                continue
-            with CoastTime():
-                for line in open(reduce_conf, encoding='utf-8'):
-                    line = line.replace('/', os.sep).strip()
-                    if line.startswith('#') or not line:
-                        continue
-                    try:
-                        target = workspace_relative_path(line)
-                    except LayoutError as error:
-                        print(f'> 跳过越界精简路径 {line}: {error}')
-                        continue
-                    if target.exists():
-                        print(line)
-                        try:
-                            shutil.rmtree(target)
-                        except NotADirectoryError:
-                            target.unlink()
-        elif int(option) == 5:
-            with CoastTime():
-                patch_addons()
-        elif int(option) in [6, 7]:
-            currentbootimg = None
-            if os.path.isfile(V.out + "boot.img"):
-                currentbootimg = V.out + "boot.img"
-            elif os.path.isfile(V.input + "boot.img"):
-                currentbootimg = V.input + "boot.img"
-            if not currentbootimg:
-                continue
-            if os.path.isfile(currentbootimg):
-                with CoastTime():
-                    patch_twrp(currentbootimg) if int(option) == 6 else patch_magisk(currentbootimg)
-        elif int(option) == 8:
-            repack_super()
-        else:
-            input(f"> Number \x1b[0;33m{option}\x1b[0m enter error !")
-        input('> 任意键继续')
+def menu_super():
+    """Directly run super image repack."""
+    with CoastTime():
+        repack_super()
+    input('> 任意键继续')
 
 
 def menu_modules():
@@ -1871,7 +1527,7 @@ menu_actions = {
     66: sys.exit,
     88: tool_info,
     7: menu_modules,
-    6: menu_more
+    6: menu_super
 }
 
 
@@ -1885,7 +1541,7 @@ def menu_main():
         print('\x1b[0;31m\t  0> 选择[etc]          1> 分解[bin]\x1b[0m\n')
         print('\x1b[0;32m\t  2> 分解[bro]          3> 分解[dat]\x1b[0m\n')
         print('\x1b[0;36m\t  4> 分解[img]          5> 分解[win]\x1b[0m\n')
-        print('\x1b[0;33m\t  6> 更多[dev]          7> 插件[sub]\x1b[0m\n')
+        print('\x1b[0;33m\t  6> 合成super          7> 插件[sub]\x1b[0m\n')
         print('\x1b[0;35m\t  8> 合成[img]          9> 合成[dat]\x1b[0m\n')
         print('\x1b[0;34m\t  10> 合成[bro]         88> 退出[bye]\x1b[0m\n')
         print('-------------------------------------------------------')
