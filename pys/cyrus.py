@@ -680,13 +680,11 @@ def _super_partitions_in_out():
     return sorted(partitions)
 
 
-def _stage_super_image(source, stage):
-    """Copy one OUT image to WORKSPACE temp dir before sparse conversion for lpmake."""
-    staged = os.path.join(stage, os.path.basename(source))
-    shutil.copy2(source, staged)
-    if gettype.gettype(staged) != 'sparse':
-        return staged
-    raw_image = imgextractor.ULTRAMAN().APPLE(staged)
+def _prepare_super_image(source):
+    """Return a raw image path for lpmake. Converts sparse in-place if needed."""
+    if gettype.gettype(source) != 'sparse':
+        return source
+    raw_image = imgextractor.ULTRAMAN().APPLE(source)
     if not raw_image or not os.path.isfile(raw_image):
         raise LayoutError(f'无法转换 sparse 镜像: {source}')
     return raw_image
@@ -698,8 +696,7 @@ def repack_super():
         input('> 未发现 OUT 文件夹下可用于合成 super 的镜像文件')
         return
 
-    stage = workspace_temp('super-repack')
-    stage_output = os.path.join(stage, 'super.img')
+    super_output = os.path.join(V.out, 'super.img')
     group_name = V.SETUP_MANIFEST['GROUP_NAME']
     super_size = V.SETUP_MANIFEST['SUPER_SIZE']
     argvs = [
@@ -719,7 +716,7 @@ def repack_super():
                     source = os.path.join(V.out, f'{part}_a.img')
                 if not os.path.isfile(source):
                     continue
-                image_a = _stage_super_image(source, stage)
+                image_a = _prepare_super_image(source)
                 image_size_a = imgextractor.ULTRAMAN().LEMON(image_a)
                 argvs.extend([
                     '--partition', f'{part}_a:readonly:{image_size_a}:{group_name}_a',
@@ -736,8 +733,8 @@ def repack_super():
                     source_a = os.path.join(V.out, f'{part}.img')
                 if not (os.path.isfile(source_a) and os.path.isfile(source_b)):
                     continue
-                image_a = _stage_super_image(source_a, stage)
-                image_b = _stage_super_image(source_b, stage)
+                image_a = _prepare_super_image(source_a)
+                image_b = _prepare_super_image(source_b)
                 size_a = imgextractor.ULTRAMAN().LEMON(image_a)
                 size_b = imgextractor.ULTRAMAN().LEMON(image_b)
                 argvs.extend([
@@ -759,7 +756,7 @@ def repack_super():
     argvs.extend([
         '--group', f'{group_name}_a:{super_size}',
         '--group', f'{group_name}_b:{super_size}',
-        '--output', stage_output,
+        '--output', super_output,
     ])
     display(
         f'重新合成: super.img <Size:{super_size}|Vab:{V.SETUP_MANIFEST["IS_VAB"]}|'
@@ -768,13 +765,10 @@ def repack_super():
     display(f"包含分区：{'|'.join(image_parts)}")
     with CoastTime():
         result = call(argvs)
-    if result != 0 or not os.path.isfile(stage_output):
+    if result != 0 or not os.path.isfile(super_output):
         print('> super.img 合成失败；OUT 中的现有分区镜像未被修改')
         return
 
-    os.makedirs(V.out, exist_ok=True)
-    os.replace(stage_output, os.path.join(V.out, 'super.img'))
-    shutil.rmtree(stage, ignore_errors=True)
     print(f'> super.img 已输出到 {V.out}')
 
 
@@ -1362,26 +1356,35 @@ def _decompress_payload_images(payload, payload_dir, mode):
         print(f"> {YELLOW}提取【{os.path.basename(payload)}】所有镜像文件:{CLOSE}\n")
         extract_payload.main(payload, payload_dir)
 
+    images = sorted(glob(os.path.join(payload_dir, '*.img')))
     if input('> 是否继续分解img [0/1]: ') != '1':
+        # Move .img to OUT
+        os.makedirs(V.out, exist_ok=True)
+        for image in images:
+            dest = os.path.join(V.out, os.path.basename(image))
+            if os.path.isfile(dest):
+                os.remove(dest)
+            shutil.move(image, dest)
+            print(f'> {os.path.basename(image)} -> {V.out}')
         return
-    for image in sorted(glob(os.path.join(payload_dir, '*.img'))):
+    # Decompose into partition trees, then clean up .img
+    for image in images:
         decompress_img(image, workspace_partition(partition_name(image)))
+    for image in images:
+        if os.path.isfile(image):
+            os.remove(image)
 
 
 def decompress_bin(infile, outdir=None, flag='1'):
     """Extract payload images directly to WORKSPACE."""
     del outdir
     os.system("clear")
-    payload_dir = os.path.join(V.workspace, '.payload-images')
     try:
         payload = _stage_work_source(infile, 'payload')
-        os.makedirs(payload_dir, exist_ok=True)
-        _decompress_payload_images(payload, payload_dir, flag)
+        _decompress_payload_images(payload, V.workspace, flag)
     except (LayoutError, OSError, AssertionError) as error:
         print(f'> Payload 分解失败: {error}')
-    finally:
-        if os.path.isdir(payload_dir):
-            shutil.rmtree(payload_dir, ignore_errors=True)
+        input('> 任意键继续')
 
 
 def appendf(msg, log):
