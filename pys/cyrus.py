@@ -1594,6 +1594,9 @@ def extract_zrom(rom):
     menu_main()
 
 
+_RESERVED_MENU_IDS = {22, 44, 66, 88}
+
+
 def lists_project(dTitle, sPath, flag):
     i = 0
     V.dict0 = {i: dTitle}
@@ -1601,12 +1604,16 @@ def lists_project(dTitle, sPath, flag):
         for obj in glob(sPath):
             if os.path.isdir(obj):
                 i += 1
+                while i in _RESERVED_MENU_IDS:
+                    i += 1
                 V.dict0[i] = obj
 
     elif flag == 1:
         for obj in glob(sPath):
             if os.path.isfile(obj):
                 i += 1
+                while i in _RESERVED_MENU_IDS:
+                    i += 1
                 V.dict0[i] = obj
 
     elif flag == 2:
@@ -1614,6 +1621,8 @@ def lists_project(dTitle, sPath, flag):
             if os.path.isdir(obj):
                 if os.path.isfile(obj + os.sep + "run.sh"):
                     i += 1
+                    while i in _RESERVED_MENU_IDS:
+                        i += 1
                     V.dict0[i] = obj
 
     e = 1
@@ -1624,71 +1633,12 @@ def lists_project(dTitle, sPath, flag):
 
     print("\n-------------------------------------------------------")
     if flag == 0:
-        print("\x1b[0;35m  [33] - 解压      [44] - 删除\n  [77] - 设置      [66] - 下载\n  [88] - 退出  \x1b[0m\n")
+        print("\x1b[0;35m  [22] - 删除项目      [44] - 工具设置\n  [66] - 退出工具      [88] - 工具信息  \x1b[0m\n")
 
     if flag == 2:
         print("\x1b[0;35m  [33] - 安装         [44] - 删除         [88] - 退出  \x1b[0m\n")
 
 
-def choose_zrom(flag=0):
-    os.system("clear")
-    if flag == 1:
-        print('\x1b[0;33m> 选择固件:\x1b[0m')
-        s_file_path = askopenfilename(title='选择一个固件', filetypes=(("zip", "*.zip"),))
-        if s_file_path:
-            extract_zrom(s_file_path)
-    else:
-        print('\x1b[0;33m> 固件列表\x1b[0m')
-        print(f"固件放置路径: {ROM_DIR}")
-        lists_project('返回上级', ROM_DIR + '*.zip', 1)
-        choice = input('> 选择: ')
-        if choice:
-            if int(choice) == 66:
-                download_zrom()
-            elif int(choice) == 0:
-                return
-            elif 0 < int(choice) < len(V.dict0):
-                extract_zrom(V.dict0[int(choice)])
-            else:
-                input(f'> Number \x1b[0;33m{choice}\x1b[0m enter error !')
-
-
-def download_rom(rom, url):
-    os.system("clear")
-    res = requests.get(url, stream=True)
-    file_size = int(res.headers.get("Content-Length"))
-    file_size_in_mb = int(file_size / 1048576)
-    com = 0
-    print(f"> {GREEN}D.N.A DOWNLOADER:{CLOSE}\n")
-    print(f"Link: {url}")
-    print(f"Size: {file_size_in_mb}Mb")
-    print(f"Path: {rom}")
-    if not os.path.isfile(rom):
-        with Progress() as progress:
-            task = progress.add_task("[yellow]Downloading...", total=file_size)
-            with open(rom, "wb") as f:
-                for chunk in res.iter_content(2097152):
-                    f.write(chunk)
-                    com += len(chunk)
-                    progress.update(task, completed=com)
-
-        if os.path.exists(rom):
-            print(f"{RED}Successed !{CLOSE}")
-            choose_zrom()
-        else:
-            if os.path.exists(rom):
-                os.remove(rom)
-            input(f"> {GREEN}Failed !{CLOSE}")
-    else:
-        input("> 发现 " + os.path.basename(rom))
-
-
-def download_zrom():
-    url = input("> 输入直链: ")
-    if url:
-        s_file_path = ROM_DIR + url.split("/")[-1]
-        if not os.path.isfile(s_file_path):
-            download_rom(s_file_path, url)
 
 
 def creat_project():
@@ -1725,11 +1675,9 @@ def menu_once():
         choice = input("> 选择: ")
         if not choice or not choice.isdigit():
             continue
-        if int(choice) == 88:
+        if int(choice) == 66:
             sys.exit()
-        elif int(choice) == 33:
-            choose_zrom(0)
-        elif int(choice) == 44:
+        elif int(choice) == 22:
             if V.dict0:
                 which = input("> 输入序号进行删除: ")
                 if not which.isdigit():
@@ -1742,11 +1690,11 @@ def menu_once():
                                 rmdire(V.dict0[int(which)])
                                 continue
                     input(f"> Number {which} Error !")
-        elif int(choice) == 66:
-            download_zrom()
-        elif int(choice) == 77:
+        elif int(choice) == 44:
             env_setup()
             load_setup_json()
+        elif int(choice) == 88:
+            tool_info()
         elif int(choice) == 0:
             if creat_project():
                 menu_main()
@@ -1882,10 +1830,46 @@ def quiet():
     V.JM = input('> 是否开启静默 [0/1]: ') == '1'
 
 
+def tool_info():
+    os.system("clear")
+    print(f"""
+\x1b[1;36m{'=' * 50}
+  A.R.T - Android ROM Tool
+{'=' * 50}\x1b[0m
+
+\x1b[1;33m项目链接:\x1b[0m
+  GitHub: https://github.com/ELF-RC/A.R.T
+
+\x1b[1;33m原工具开发者:\x1b[0m
+  ColdWindScholar (3590361911@qq.com)
+
+\x1b[1;33m工具开发者:\x1b[0m
+  ELF-RC (3580977309@qq.com)
+
+\x1b[1;33m二进制文件开发者:\x1b[0m
+  AOSP (Apache-2.0)        - make_ext4fs, img2simg, lpmake
+  erofs-utils (GPL-2.0)    - extract.erofs, mkfs.erofs
+  e2fsprogs (GPL-2.0)      - mke2fs, e2fsdroid, e2fsck, resize2fs
+  Magisk (GPL-3.0)         - magiskboot
+  BusyBox (GPL-2.0)        - busybox, cpio
+  Google (Apache-2.0)      - brotli
+  Meta (BSD-3-Clause)      - zstd
+  dtc (GPL-2.0)            - dtc
+
+\x1b[1;33m协议:\x1b[0m
+  本工具使用 AGPL-3.0 协议
+
+\x1b[1;33m感谢所有开源贡献者！\x1b[0m
+{'=' * 50}
+""")
+    input('> 任意键返回')
+
+
 menu_actions = {
     55: lambda: input(
         "Github: https://github.com/ColdWindScholar/D.N.A3/\nWrote By ColdWindScholar (3590361911@qq.com)"),
-    88: sys.exit,
+    66: sys.exit,
+    88: tool_info,
     7: menu_modules,
     6: menu_more
 }
