@@ -34,7 +34,6 @@ PWD_DIR = os.getcwd() + os.sep
 MOD_DIR = PWD_DIR + "local/sub/"
 ROM_DIR = PWD_DIR
 SETUP_JSON = PWD_DIR + "local/set/setup.json"
-MAGISK_JSON = PWD_DIR + "local/set/magisk.json"
 BIN_PATH = PWD_DIR + "local/bin/Linux/x86_64/"
 RED, WHITE, CYAN, YELLOW, MAGENTA, GREEN, BOLD, CLOSE = ['\x1b[91m',
                                                          '\x1b[97m', '\x1b[36m',
@@ -187,35 +186,11 @@ def load_setup_json():
     validate_default_env_setup(V.SETUP_MANIFEST)
     with open(SETUP_JSON, "w", encoding="utf-8") as f:
         json.dump(V.SETUP_MANIFEST, f, indent=4)
-    add_dir = f"{PWD_DIR}local/etc/devices/{V.SETUP_MANIFEST['DEVICE_CODE']}/{V.SETUP_MANIFEST['ANDROID_SDK']}"
-    if not os.path.isdir(f"{add_dir}/addons"):
-        os.makedirs(f"{add_dir}/addons")
-    if not os.path.isfile(f"{add_dir}/ramdisk.cpio"):
-        try:
-            open(os.path.join(add_dir, "ramdisk.cpio.txt"), 'w').close()
-        except Exception:
-            ...
-    if not os.path.isfile(f"{add_dir}/reduce.txt"):
-        with open(f"{add_dir}/reduce.txt", "w", encoding='utf-8', newline='\n') as f:
-            f.write(
-                "product/app/PhotoTable\nsystem/system/app/BasicDreams\nsystem/system/data-app/Youpin\nsystem_ext/priv-app/EmergencyInfo\nvendor/app/MiGameService\n")
-    if not os.path.isfile(MAGISK_JSON):
-        default_magisk = {'CLASS': "alpha",
-                          'KEEPVERITY': "true",
-                          'KEEPFORCEENCRYPT': "true",
-                          'PATCHVBMETAFLAG': "false",
-                          'TARGET': "arm",
-                          'IS_64BIT': "true"}
-        with open(MAGISK_JSON, "w", encoding="utf-8") as g:
-            json.dump(default_magisk, g, indent=4)
 
 
 def set_default_env_setup():
     properties = {
         'IS_VAB': "1",
-        'IS_DYNAMIC': "1",
-        'ANDROID_SDK': "12",
-        'DEVICE_CODE': "alioth",
         'REPACK_EROFS_IMG': "1",
         'REPACK_TO_RW': "0",
         'RESIZE_IMG': "0",
@@ -224,7 +199,6 @@ def set_default_env_setup():
         'REPACK_BR_LEVEL': "3",
         'SUPER_SIZE': "9126805504",
         'GROUP_NAME': "qti_dynamic_partitions",
-        'SUPER_SECTOR': "2048",
         'SUPER_SPARSE': "1",
         'UTC': "LIVE",
         'UNPACK_SPLIT_DAT': "15"}
@@ -233,15 +207,13 @@ def set_default_env_setup():
 
 
 def validate_default_env_setup(setup_manifest):
-    for k in ('IS_VAB', 'IS_DYNAMIC', 'REPACK_EROFS_IMG', 'REPACK_SPARSE_IMG', 'REPACK_TO_RW',
+    for k in ('IS_VAB', 'REPACK_EROFS_IMG', 'REPACK_SPARSE_IMG', 'REPACK_TO_RW',
               'SUPER_SPARSE', 'RESIZE_IMG'):
         if setup_manifest[k] not in ('1', '0'):
             sys.exit(f"Invalid [{k}] - must be one of <1/0>")
 
     if setup_manifest["RESIZE_EROFSIMG"] not in ('1', '2', '0'):
         sys.exit("Invalid [RESIZE_EROFSIMG] - must be one of <1/2/0>")
-    if not re.match("\\d{1,2}", setup_manifest["ANDROID_SDK"]) or int(setup_manifest["ANDROID_SDK"]) < 5:
-        sys.exit(f"Invalid [ANDROID_SDK : {setup_manifest['ANDROID_SDK']}] - must be one of <5+>")
     if not re.match("[0-9]", setup_manifest["REPACK_BR_LEVEL"]):
         sys.exit(f"Invalid [{setup_manifest['REPACK_BR_LEVEL']}] - must be one of <0-9>")
     if not re.match("\\d{1,3}", setup_manifest["UNPACK_SPLIT_DAT"]):
@@ -251,9 +223,6 @@ def validate_default_env_setup(setup_manifest):
 
 def env_setup():
     question_list = {
-        '安卓版本[12]': "ANDROID_SDK",
-        '机型代号[alioth]': "DEVICE_CODE",
-        '是否动态分区[1/0]': "IS_DYNAMIC",
         '是否虚拟AB分区[1/0]': "IS_VAB",
         '合成镜像类型[0:EXT4/1:EROFS]': "REPACK_EROFS_IMG",
         '合成镜像格式[0:RAW/1:SPARSE]': "REPACK_SPARSE_IMG",
@@ -266,7 +235,6 @@ def env_setup():
         '压缩BROTLI等级[0-9|3]': "REPACK_BR_LEVEL",
         '动态分区簇名称[qti_dynamic_partitions]': "GROUP_NAME",
         '动态SUPER分区总大小[9126805504]': "SUPER_SIZE",
-        '动态分区扇区大小[2048]': "SUPER_SECTOR",
         '自定义UTC时间戳[live]': "UTC",
         '分段DAT/IMG支持个数[15]': "UNPACK_SPLIT_DAT"}
     while True:
