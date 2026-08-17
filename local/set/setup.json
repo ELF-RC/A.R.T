@@ -1,5 +1,4 @@
 {
-    "IS_VAB": "1",
     "REPACK_EROFS_IMG": "1",
     "REPACK_TO_RW": "0",
     "RESIZE_IMG": "0",
@@ -10,7 +9,6 @@
     "REPACK_BR_LEVEL": "3",
     "SUPER_SIZE": "9126805504",
     "GROUP_NAME": "qti_dynamic_partitions",
-    "SUPER_SPARSE": "1",
     "UTC": "LIVE",
     "UNPACK_SPLIT_DAT": "15"
 }

@@ -188,27 +188,30 @@ def load_setup_json():
         json.dump(V.SETUP_MANIFEST, f, indent=4)
 
 
+_SETUP_DEFAULTS = {
+    'REPACK_EROFS_IMG': "1",
+    'REPACK_TO_RW': "0",
+    'RESIZE_IMG': "0",
+    'RESIZE_EROFSIMG': "1",
+    'EROFS_LEVEL': "1",
+    'EROFS_OLD_KERNEL': "0",
+    'REPACK_SPARSE_IMG': "0",
+    'REPACK_BR_LEVEL': "3",
+    'SUPER_SIZE': "9126805504",
+    'GROUP_NAME': "qti_dynamic_partitions",
+    'UTC': "LIVE",
+    'UNPACK_SPLIT_DAT': "15"}
+
+
 def set_default_env_setup():
-    properties = {
-        'IS_VAB': "1",
-        'REPACK_EROFS_IMG': "1",
-        'REPACK_TO_RW': "0",
-        'RESIZE_IMG': "0",
-        'RESIZE_EROFSIMG': "1",
-        'REPACK_SPARSE_IMG': "0",
-        'REPACK_BR_LEVEL': "3",
-        'SUPER_SIZE': "9126805504",
-        'GROUP_NAME': "qti_dynamic_partitions",
-        'SUPER_SPARSE': "1",
-        'UTC': "LIVE",
-        'UNPACK_SPLIT_DAT': "15"}
-    with open(SETUP_JSON, 'w', encoding='utf-8') as ss:
-        json.dump(properties, ss, ensure_ascii=False, indent=4)
+    """Merge defaults into existing manifest, preserving user values."""
+    for key, value in _SETUP_DEFAULTS.items():
+        V.SETUP_MANIFEST.setdefault(key, value)
 
 
 def validate_default_env_setup(setup_manifest):
-    for k in ('IS_VAB', 'REPACK_EROFS_IMG', 'REPACK_SPARSE_IMG', 'REPACK_TO_RW',
-              'SUPER_SPARSE', 'RESIZE_IMG'):
+    for k in ('REPACK_EROFS_IMG', 'REPACK_SPARSE_IMG', 'REPACK_TO_RW',
+              'RESIZE_IMG'):
         if setup_manifest[k] not in ('1', '0'):
             sys.exit(f"Invalid [{k}] - must be one of <1/0>")
 
@@ -223,10 +226,8 @@ def validate_default_env_setup(setup_manifest):
 
 def env_setup():
     question_list = {
-        '是否虚拟AB分区[1/0]': "IS_VAB",
         '合成镜像类型[0:EXT4/1:EROFS]': "REPACK_EROFS_IMG",
         '合成镜像格式[0:RAW/1:SPARSE]': "REPACK_SPARSE_IMG",
-        '合成SUPER镜像格式[1:SPARSE/0:RAW]': "SUPER_SPARSE",
         '合成EXT4动态分区状态[0:RO/1:RW]': "REPACK_TO_RW",
         '合成EXT4压缩分区空间[0/1]': "RESIZE_IMG",
         '合成EROFS压缩算法[0:NO/1:LZ4HC/2:LZ4]': "RESIZE_EROFSIMG",
@@ -357,42 +358,24 @@ def workspace_relative_path(relative_path):
     return V.layout.require_workspace_path(Path(V.workspace, relative))
 
 
-def _super_partitions_in_out():
-    patterns = ('system*', 'product*', 'vendor*', 'odm*', 'my_*')
-    partitions = set()
-    for pattern in patterns:
-        for image in glob(os.path.join(V.out, f'{pattern}.img')):
-            label = Path(image).stem
-            if label == 'super':
-                continue
-            if label.endswith(('_a', '_b')):
-                label = label[:-2]
-            try:
-                partitions.add(ProjectLayout.validate_component(label, '分区'))
-            except LayoutError:
-                continue
-    return sorted(partitions)
+def _get_image_logical_size(source):
+    """Return logical size of an image (sparse-aware)."""
+    return imgextractor.ULTRAMAN().LEMON(source)
 
 
-def _prepare_super_image(source):
-    """Return a raw image path for lpmake. Converts sparse in-place if needed."""
-    if gettype.gettype(source) != 'sparse':
-        return source
-    raw_image = imgextractor.ULTRAMAN().APPLE(source)
-    if not raw_image or not os.path.isfile(raw_image):
-        raise LayoutError(f'无法转换 sparse 镜像: {source}')
-    return raw_image
+def repack_super(selected_parts, super_type, super_sparse):
+    """Synthesize super.img from selected partition images.
 
-
-def repack_super():
-    parts = _super_partitions_in_out()
-    if not parts:
-        input('> 未发现 OUT 文件夹下可用于合成 super 的镜像文件')
-        return
-
-    super_output = os.path.join(V.out, 'super.img')
+    Args:
+        selected_parts: list of (name, path) tuples from INPUT
+        super_type: 0=A-only, 1=A/B, 2=Virtual A/B
+        super_sparse: 1=sparse output, 0=raw output
+    """
     group_name = V.SETUP_MANIFEST['GROUP_NAME']
     super_size = V.SETUP_MANIFEST['SUPER_SIZE']
+    super_output = os.path.join(V.out, 'super.img')
+    type_names = {0: 'A-only', 1: 'A/B', 2: 'Virtual A/B'}
+
     argvs = [
         'lpmake',
         '--metadata-size', '65536',
@@ -401,66 +384,98 @@ def repack_super():
     ]
     image_parts = []
 
+    # Convert sparse images to raw before passing to lpmake
+    raw_parts = []
     try:
-        if V.SETUP_MANIFEST['IS_VAB'] == '1':
-            argvs.extend(['--metadata-slots', '3', '--virtual-ab', '-F'])
-            for part in parts:
-                source = os.path.join(V.out, f'{part}.img')
-                if not os.path.isfile(source):
-                    source = os.path.join(V.out, f'{part}_a.img')
-                if not os.path.isfile(source):
-                    continue
-                image_a = _prepare_super_image(source)
-                image_size_a = imgextractor.ULTRAMAN().LEMON(image_a)
+        for name, path in selected_parts:
+            if gettype.gettype(path) == 'sparse':
+                display(f'转换 sparse: {os.path.basename(path)} ...')
+                raw = imgextractor.ULTRAMAN().APPLE(path)
+                if not raw or not os.path.isfile(raw):
+                    print(f'> 无法转换 sparse 镜像: {path}')
+                    return
+                raw_parts.append((name, raw))
+            else:
+                raw_parts.append((name, path))
+    except (LayoutError, OSError) as error:
+        print(f'> 准备 super 镜像失败: {error}')
+        return
+
+    # Check for _b images in INPUT for A/B and VAB modes
+    input_dir = V.input
+
+    try:
+        if super_type == 0:
+            # A-only: slots=2, single group, no suffix
+            argvs.extend(['--metadata-slots', '2',
+                          '--group', f'{group_name}:{super_size}'])
+            for name, path in raw_parts:
+                size = os.path.getsize(path)
                 argvs.extend([
-                    '--partition', f'{part}_a:readonly:{image_size_a}:{group_name}_a',
-                    '--image', f'{part}_a={image_a}',
-                    '--partition', f'{part}_b:readonly:0:{group_name}_b',
+                    '--partition', f'{name}:readonly:{size}:{group_name}',
+                    '--image', f'{name}={path}',
                 ])
-                image_parts.append(part)
+                image_parts.append(name)
+        elif super_type == 1:
+            # A/B: slots=3, dual groups _a/_b, _b uses actual image if available
+            argvs.extend(['--metadata-slots', '3',
+                          '--group', f'{group_name}_a:{super_size}',
+                          '--group', f'{group_name}_b:{super_size}'])
+            for name, path in raw_parts:
+                size_a = os.path.getsize(path)
+                argvs.extend([
+                    '--partition', f'{name}_a:readonly:{size_a}:{group_name}_a',
+                    '--image', f'{name}_a={path}',
+                ])
+                # Check for _b.img in INPUT (MIO behavior: _b empty if not provided)
+                b_path = os.path.join(input_dir, f'{name}_b.img')
+                if os.path.isfile(b_path):
+                    if gettype.gettype(b_path) == 'sparse':
+                        display(f'转换 sparse: {os.path.basename(b_path)} ...')
+                        b_raw = imgextractor.ULTRAMAN().APPLE(b_path)
+                        if b_raw and os.path.isfile(b_raw):
+                            b_path = b_raw
+                    size_b = os.path.getsize(b_path)
+                    argvs.extend([
+                        '--partition', f'{name}_b:readonly:{size_b}:{group_name}_b',
+                        '--image', f'{name}_b={b_path}',
+                    ])
+                else:
+                    argvs.extend([
+                        '--partition', f'{name}_b:readonly:0:{group_name}_b',
+                    ])
+                image_parts.append(name)
         else:
-            argvs.extend(['--metadata-slots', '2'])
-            for part in parts:
-                source_a = os.path.join(V.out, f'{part}_a.img')
-                source_b = os.path.join(V.out, f'{part}_b.img')
-                if not os.path.isfile(source_a):
-                    source_a = os.path.join(V.out, f'{part}.img')
-                if not (os.path.isfile(source_a) and os.path.isfile(source_b)):
-                    continue
-                image_a = _prepare_super_image(source_a)
-                image_b = _prepare_super_image(source_b)
-                size_a = imgextractor.ULTRAMAN().LEMON(image_a)
-                size_b = imgextractor.ULTRAMAN().LEMON(image_b)
+            # Virtual A/B: slots=3, dual groups _a/_b, _b size=0, --virtual-ab
+            argvs.extend(['--metadata-slots', '3', '--virtual-ab', '-F',
+                          '--group', f'{group_name}_a:{super_size}',
+                          '--group', f'{group_name}_b:{super_size}'])
+            for name, path in raw_parts:
+                size = os.path.getsize(path)
                 argvs.extend([
-                    '--partition', f'{part}_a:readonly:{size_a}:{group_name}_a',
-                    '--image', f'{part}_a={image_a}',
-                    '--partition', f'{part}_b:readonly:{size_b}:{group_name}_b',
-                    '--image', f'{part}_b={image_b}',
+                    '--partition', f'{name}_a:readonly:{size}:{group_name}_a',
+                    '--image', f'{name}_a={path}',
+                    '--partition', f'{name}_b:readonly:0:{group_name}_b',
                 ])
-                image_parts.append(part)
+                image_parts.append(name)
     except (LayoutError, OSError) as error:
         print(f'> 准备 super 镜像失败: {error}')
         return
 
     if not image_parts:
-        input('> 未发现与当前 A/B 设置匹配的 OUT 分区镜像')
+        print('> 未选择任何分区镜像')
         return
-    if V.SETUP_MANIFEST['SUPER_SPARSE'] == '1':
+
+    if super_sparse == 1:
         argvs.append('--sparse')
-    argvs.extend([
-        '--group', f'{group_name}_a:{super_size}',
-        '--group', f'{group_name}_b:{super_size}',
-        '--output', super_output,
-    ])
-    display(
-        f'重新合成: super.img <Size:{super_size}|Vab:{V.SETUP_MANIFEST["IS_VAB"]}|'
-        f'Sparse:{V.SETUP_MANIFEST["SUPER_SPARSE"]}>'
-    )
+    argvs.extend(['--out', super_output])
+
+    display(f'重新合成: super.img <Size:{super_size}|Type:{type_names[super_type]}|Sparse:{super_sparse}>')
     display(f"包含分区：{'|'.join(image_parts)}")
     with CoastTime():
         result = call(argvs)
     if result != 0 or not os.path.isfile(super_output):
-        print('> super.img 合成失败；OUT 中的现有分区镜像未被修改')
+        print('> super.img 合成失败')
         return
 
     print(f'> super.img 已输出到 {V.out}')
@@ -604,13 +619,8 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
             for partition in ('system', 'system_ext', 'product', 'vendor', 'odm'):
                 for slot in ('_a', '_b'):
                     CONTENT += f"add {partition}{slot} qti_dynamic_partitions{slot}\n"
-            if V.SETUP_MANIFEST["IS_VAB"] == "1":
-                for partition in ('system_a', 'system_ext_a', 'product_a', 'vendor_a', 'odm_a'):
-                    CONTENT += f"resize {partition} 2\n"
-            else:
-                for partition in ('system', 'system_ext', 'product', 'vendor', 'odm'):
-                    for slot in ('_a', '_b'):
-                        CONTENT += f"resize {partition}{slot} 2\n"
+            for partition in ('system_a', 'system_ext_a', 'product_a', 'vendor_a', 'odm_a'):
+                CONTENT += f"resize {partition} 2\n"
             with open(new_op_list, "w", encoding="UTF-8", newline="\n") as ST:
                 ST.write(CONTENT)
         renew_size = os.path.getsize(distance)
@@ -786,7 +796,9 @@ def _safe_remove_workspace_dir(path):
 
 def _super_images_to_process(super_dir):
     images = sorted(glob(os.path.join(super_dir, '*.img')))
-    if V.SETUP_MANIFEST['IS_VAB'] != '1':
+    # Auto-detect VAB: if any _a.img exists, treat as VAB
+    has_a_suffix = any(Path(img).stem.endswith('_a') for img in images)
+    if not has_a_suffix:
         return [(image, partition_name(image)) for image in images if os.path.getsize(image) > 0]
 
     selected = []
@@ -1407,9 +1419,68 @@ def menu_once():
 
 
 def menu_super():
-    """Directly run super image repack."""
+    """Interactive super image repack: select partitions from INPUT, choose type and format."""
+    os.system("clear")
+    print(f'\x1b[1;36m> 合成 super.img\x1b[0m')
+    print(f'> 请将需要打包的 .img 文件放入 INPUT 目录')
+    print(f'> INPUT: {V.input}')
+    input('> 准备好后按回车继续...')
+
+    # Scan INPUT for .img files
+    images = sorted(glob(os.path.join(V.input, '*.img')))
+    if not images:
+        print('> INPUT 目录下未发现 .img 文件')
+        input('> 任意键返回')
+        return
+
+    print(f'\n发现以下镜像文件：')
+    for i, img in enumerate(images, 1):
+        print(f'  [{i}] {os.path.basename(img)}')
+
+    # Ask user to select each image, strip _a/_b suffix for partition name
+    selected = []
+    for img in images:
+        stem = Path(img).stem
+        # Strip _a/_b suffix to get canonical partition name (MIO behavior)
+        if stem.endswith('_a') or stem.endswith('_b'):
+            name = stem[:-2]
+        else:
+            name = stem
+        choice = input(f'\n是否要打包 {os.path.basename(img)} ? [1:YES/0:NO]: ')
+        if choice == '1':
+            selected.append((name, img))
+            print(f'  ✓ {name}')
+        else:
+            print(f'  ✗ {name} (跳过)')
+
+    if not selected:
+        print('\n> 未选择任何镜像')
+        input('> 任意键返回')
+        return
+
+    # Ask super type with validation
+    while True:
+        super_type = input('\n打包类型 [0:Aonly/1:AB/2:VAB]: ')
+        if super_type in ('0', '1', '2'):
+            super_type = int(super_type)
+            break
+        print('> 无效输入，请输入 0、1 或 2')
+
+    # Ask sparse format with validation
+    while True:
+        super_sparse = input('合成 SUPER 镜像格式 [1:SPARSE/0:RAW]: ')
+        if super_sparse in ('0', '1'):
+            super_sparse = int(super_sparse)
+            break
+        print('> 无效输入，请输入 0 或 1')
+
+    type_names = {0: 'A-only', 1: 'A/B', 2: 'Virtual A/B'}
+    print(f'\n打包类型: {type_names[super_type]}')
+    print(f'输出格式: {"SPARSE" if super_sparse else "RAW"}')
+    print(f'包含分区: {", ".join(name for name, _ in selected)}')
+
     with CoastTime():
-        repack_super()
+        repack_super(selected, super_type, super_sparse)
     input('> 任意键继续')
 
 
