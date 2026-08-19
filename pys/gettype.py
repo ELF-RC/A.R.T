@@ -34,7 +34,7 @@ def gettype(file) -> str:
         elif len(f_) == 3:
             if compare(f_[0], f_[2]):
                 return f_[1]
-    return "unknow"
+    return "unknown"
 
 
 def findfile(file, dir_) -> str:

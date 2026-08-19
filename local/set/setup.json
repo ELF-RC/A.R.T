@@ -10,5 +10,6 @@
     "SUPER_SIZE": "9126805504",
     "GROUP_NAME": "qti_dynamic_partitions",
     "UTC": "LIVE",
-    "UNPACK_SPLIT_DAT": "15"
+    "UNPACK_SPLIT_DAT": "15",
+    "BOOT_SKIP_RAMDISK": "0"
 }

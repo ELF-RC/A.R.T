@@ -200,7 +200,8 @@ _SETUP_DEFAULTS = {
     'SUPER_SIZE': "9126805504",
     'GROUP_NAME': "qti_dynamic_partitions",
     'UTC': "LIVE",
-    'UNPACK_SPLIT_DAT': "15"}
+    'UNPACK_SPLIT_DAT': "15",
+    'BOOT_SKIP_RAMDISK': "0"}
 
 
 def set_default_env_setup():
@@ -237,7 +238,8 @@ def env_setup():
         '动态分区簇名称[qti_dynamic_partitions]': "GROUP_NAME",
         '动态SUPER分区总大小[9126805504]': "SUPER_SIZE",
         '自定义UTC时间戳[live]': "UTC",
-        '分段DAT/IMG支持个数[15]': "UNPACK_SPLIT_DAT"}
+        '分段DAT/IMG支持个数[15]': "UNPACK_SPLIT_DAT",
+        '跳过Ramdisk解包打包[0/1]': "BOOT_SKIP_RAMDISK"}
     while True:
         os.system("clear")
         print(f"\n> {GREEN}设置文件{CLOSE}: {SETUP_JSON.replace(PWD_DIR, '')}")
@@ -676,14 +678,14 @@ def unpackboot(file, distance):
             return False
 
         ramdisk = work_dir / 'ramdisk.cpio'
-        if not ramdisk.is_file():
+        if not ramdisk.is_file() or V.SETUP_MANIFEST.get('BOOT_SKIP_RAMDISK', '0') == '1':
             print("Unpack Done!")
             return True
 
         comp = gettype.gettype(str(ramdisk))
         print(f"Ramdisk is {comp}")
         (work_dir / 'comp').write_text(comp, encoding='utf-8')
-        if comp != 'unknow':
+        if comp != 'unknown':
             compressed_ramdisk = work_dir / 'ramdisk.cpio.comp'
             os.replace(ramdisk, compressed_ramdisk)
             if call([
@@ -698,9 +700,12 @@ def unpackboot(file, distance):
         ramdisk_dir = work_dir / 'ramdisk'
         ramdisk_dir.mkdir(exist_ok=True)
         print("Unpacking Ramdisk...")
-        if call(['cpio', '-i', '-d', '-F', 'ramdisk.cpio', '-D', 'ramdisk']) != 0:
+        os.chdir(ramdisk_dir)
+        if call(['magiskboot', 'cpio', str(work_dir / 'ramdisk.cpio'), 'extract']) != 0:
             print("Unpack Ramdisk Fail...")
+            os.chdir(work_dir)
             return False
+        os.chdir(work_dir)
         return True
     except OSError as error:
         print(f"Unpack {file} Fail: {error}")
@@ -711,48 +716,44 @@ def unpackboot(file, distance):
 
 def dboot(infile, dist):
     or_dir = os.getcwd()
-    flag = ''
     if not os.path.exists(infile):
         print(f"Cannot Find {infile}...")
         return
-    if os.path.isdir(infile + os.sep + "ramdisk"):
+    if os.path.isdir(infile + os.sep + "ramdisk") and V.SETUP_MANIFEST.get('BOOT_SKIP_RAMDISK', '0') == '0':
+        new_cpio = os.path.join(infile, "ramdisk-new.cpio")
         try:
             os.chdir(infile + os.sep + "ramdisk")
         except Exception as e:
             print("Ramdisk Not Found.. %s" % e)
             return
-        cpio = gettype.findfile('cpio',
-                                BIN_PATH).replace(
-            '\\', "/")
-        call(exe="busybox ash -c \"find | sed 1d | %s -H newc -R 0:0 -o -F ../ramdisk-new.cpio\"" % cpio, sp=1,
-             shstate=True)
+        busybox = gettype.findfile('busybox', BIN_PATH).replace('\\', "/")
+        try:
+            proc = subprocess.Popen(
+                f'find . -mindepth 1 | {busybox} cpio -o -H newc -R 0:0 -F ../ramdisk-new.cpio',
+                shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            )
+            stdout, _ = proc.communicate(timeout=120)
+            cpio_rc = proc.returncode
+        except (subprocess.TimeoutExpired, OSError) as e:
+            print(f"cpio error: {e}")
+            cpio_rc = 1
         os.chdir(infile)
-        with open("comp", "r", encoding='utf-8') as compf:
-            comp = compf.read()
-        print("Compressing:%s" % comp)
-        if comp != "unknow":
-            if call(['magiskboot', f'compress={comp}', 'ramdisk-new.cpio']) != 0:
-                print("Pack Ramdisk Fail...")
-                os.remove("ramdisk-new.cpio")
-                return
-            else:
-                print("Pack Ramdisk Successful..")
-                try:
-                    os.remove("ramdisk.cpio")
-                except Exception:
-                    pass
-                os.rename("ramdisk-new.cpio.%s" % comp.split('_')[0], "ramdisk.cpio")
-        else:
-            print("Pack Ramdisk Successful..")
+        if cpio_rc != 0 or not os.path.isfile(new_cpio):
+            print("Pack Ramdisk Fail... (cpio error)")
+            os.chdir(or_dir)
+            return
+        print("Pack Ramdisk Successful..")
+        try:
             os.remove("ramdisk.cpio")
-            os.rename("ramdisk-new.cpio", "ramdisk.cpio")
-        if comp == "cpio":
-            flag = "-n"
+        except OSError:
+            pass
+        os.rename("ramdisk-new.cpio", "ramdisk.cpio")
     else:
         os.chdir(infile)
-    repack_args = ['magiskboot', 'repack', flag, os.path.join(infile, "boot_o.img")]
+    repack_args = ['magiskboot', 'repack', os.path.join(infile, "boot_o.img")]
     if call(repack_args) != 0:
         print("Pack boot Fail...")
+        os.chdir(or_dir)
         return
     else:
         if os.path.exists(os.path.join(dist, os.path.basename(infile) + ".img")):
