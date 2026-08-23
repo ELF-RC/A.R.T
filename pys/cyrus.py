@@ -931,6 +931,39 @@ def decompress_img(source, distance=None, keep=1):
             print(f'> super 分解失败: {error}')
             return
         if input('> 是否继续分解img [0/1]: ') != '1':
+            # 清理 _a/_b 后缀：双槽均非0B保留，单边去后缀
+            files = {Path(f).stem: Path(super_dir) / f for f in os.listdir(super_dir) if f.endswith('.img')}
+            a_parts = {s[:-2]: p for s, p in files.items() if s.endswith('_a') and p.exists()}
+            b_parts = {s[:-2]: p for s, p in files.items() if s.endswith('_b') and p.exists()}
+            for part in sorted(set(a_parts) | set(b_parts)):
+                pa = a_parts.get(part)
+                pb = b_parts.get(part)
+                size_a = pa.stat().st_size if pa and pa.exists() else 0
+                size_b = pb.stat().st_size if pb and pb.exists() else 0
+                if size_a == 0 and size_b == 0:
+                    # 两侧均为 0B，全部删除
+                    for p in (pa, pb):
+                        if p and p.exists():
+                            p.unlink()
+                elif size_a > 0 and size_b > 0:
+                    # A/B 双槽均有效，保留 _a/_b 后缀
+                    pass
+                elif size_a > 0:
+                    # 仅 A 槽有内容，system_b.img(0B) 删，system_a.img → system.img
+                    if pb and pb.exists():
+                        pb.unlink()
+                    dest = Path(super_dir) / f'{part}.img'
+                    if dest.exists():
+                        dest.unlink()
+                    pa.rename(dest)
+                else:
+                    # 仅 B 槽有内容，system_a.img(0B) 删，system_b.img → system.img
+                    if pa and pa.exists():
+                        pa.unlink()
+                    dest = Path(super_dir) / f'{part}.img'
+                    if dest.exists():
+                        dest.unlink()
+                    pb.rename(dest)
             return
         for image, image_partition in _super_images_to_process(super_dir):
             decompress_img(image, workspace_partition(image_partition))
