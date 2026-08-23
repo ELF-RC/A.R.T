@@ -924,7 +924,7 @@ def decompress_img(source, distance=None, keep=1):
             print(f'> EROFS 分解失败: {error}')
     elif file_type == 'super':
         display(f'正在分解: {os.path.basename(working_source)} <{file_type}>', 3)
-        super_dir = workspace_temp('super')
+        super_dir = os.path.join(V.workspace, 'super') + os.sep
         try:
             lpunpack.unpack(working_source, super_dir)
         except (Exception, SystemExit) as error:
