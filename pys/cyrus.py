@@ -964,6 +964,20 @@ def decompress_img(source, distance=None, keep=1):
                     if dest.exists():
                         dest.unlink()
                     pb.rename(dest)
+            # 将清理后的 img 文件移至 OUT 目录，再删除 super 临时目录
+            out_dir = V.out
+            if not os.path.isdir(out_dir):
+                os.makedirs(out_dir)
+            remaining = [f for f in os.listdir(super_dir) if f.endswith('.img')]
+            if remaining:
+                for name in sorted(remaining):
+                    src = Path(super_dir) / name
+                    dst = Path(out_dir) / name
+                    if dst.exists():
+                        dst.unlink()
+                    os.replace(str(src), str(dst))
+                    display(f'已输出: {name} -> {out_dir}')
+            shutil.rmtree(super_dir, ignore_errors=True)
             return
         for image, image_partition in _super_images_to_process(super_dir):
             decompress_img(image, workspace_partition(image_partition))
