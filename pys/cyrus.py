@@ -1655,8 +1655,8 @@ menu_actions = {
         "Github: https://github.com/ColdWindScholar/D.N.A3/\nWrote By ColdWindScholar (3590361911@qq.com)"),
     66: sys.exit,
     88: tool_info,
-    7: menu_modules,
-    6: menu_super
+    8: menu_modules,
+    7: menu_super
 }
 
 
@@ -1667,12 +1667,15 @@ def menu_main():
         os.system("clear")
         print(f'\x1b[1;36m> 当前工程: \x1b[0m{V.project}')
         print('-------------------------------------------------------------\n')
-        print('\x1b[0;31m\t   0 > 返回主菜单           1 > 分解 [bin]\x1b[0m\n')
-        print('\x1b[0;32m\t   2 > 分解 [dat.br]        3 > 分解 [dat]\x1b[0m\n')
-        print('\x1b[0;36m\t   4 > 分解 [img]           5 > 分解 [win]\x1b[0m\n')
-        print('\x1b[0;33m\t   6 > 合成 [super]         7 > 插件 [sub]\x1b[0m\n')
-        print('\x1b[0;35m\t   8 > 合成 [img]           9 > 合成 [dat]\x1b[0m\n')
-        print('\x1b[0;34m\t  10 > 合成 [dat.br]       66 > 退出工具\x1b[0m\n')
+        print('\x1b[0;31m\t   0 > 返回主菜单            66 > 退出工具\x1b[0m\n')
+        print('\n')
+        print('\x1b[0;32m\t   1 > 分解 [bin]            2 > 分解 [dat.br]        \x1b[0m\n')
+        print('\x1b[0;36m\t   3 > 分解 [dat]            4 > 分解 [img]\x1b[0m\n')
+        print('\x1b[0;33m\t   5 > 分解 [win]               \x1b[0m\n')
+        print('\n')
+        print('\x1b[0;35m\t   7 > 合成 [super]          8 > 插件 [sub]\x1b[0m\n')
+        print('\x1b[0;34m\t   9 > 合成 [img]           10 > 合成 [dat]\x1b[0m\n')
+        print('\x1b[0;32m\t  11 > 合成 [dat.br]\x1b[0m\n')
         print('-------------------------------------------------------------')
         option = input(f'> {RED}输入序号{CLOSE} >> ')
         if not option.isdigit():
@@ -1680,7 +1683,7 @@ def menu_main():
             continue
 
         option = int(option)
-        valid_options = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 55, 66, 88}
+        valid_options = {0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 55, 66, 88}
         if option not in valid_options:
             input(f'> 无效序号: {option}')
             continue
@@ -1705,9 +1708,9 @@ def menu_main():
                 infile.append(i)
             quiet()
             decompress_win(list(set(sorted(infile))))
-        elif int(option) in [8, 9, 10]:
+        elif int(option) in [9, 10, 11]:
             quiet()
-            if int(option) == 8:
+            if int(option) == 9:
                 for file in glob(V.config + '*_kernel.txt'):
                     f_basename = os.path.basename(file).rsplit('_', 1)[0]
                     source = workspace_partition(f_basename)
@@ -1728,7 +1731,7 @@ def menu_main():
                         infojson = None
                     if os.path.isfile(contexts) and os.path.isfile(fsconfig):
                         if not V.JM:
-                            txts = {8: "img", 9: "new.dat", 10: "new.dat.br"}
+                            txts = {9: "img", 10: "new.dat", 11: "new.dat.br"}
                             display(f'是否合成: {f_basename}.{txts.get(int(option), ".new.dat.br")} [1/0]: ', end='')
                             if input() != '1':
                                 continue
