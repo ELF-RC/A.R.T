@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import argparse
 import os
+import re
 import shutil
 import sys
 import zipfile
@@ -14,7 +16,7 @@ ROOT = Path(__file__).resolve().parent
 BUILD_DIR = ROOT / '.art-build'
 DIST_DIR = ROOT / '.art-dist'
 RELEASE_DIR = ROOT / '.art-release'
-ARCHIVE = ROOT / 'A.R.T-Linux-amd64.zip'
+_ARCHIVE_PATTERN = re.compile(r'^\d+\.\d+\.\d+$')
 
 
 def _log(step: str, msg: str) -> None:
@@ -59,8 +61,23 @@ def zip_release(release_dir: Path, archive_path: Path) -> int:
     return count
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description='A.R.T Release Builder')
+    parser.add_argument('--version', type=str, help='Release version (e.g. 1.3.0)')
+    args = parser.parse_args()
+    if args.version and not _ARCHIVE_PATTERN.match(args.version):
+        parser.error(f'Invalid version format: {args.version!r} (expected X.Y.Z)')
+    return args
+
+
 def main() -> None:
+    args = parse_args()
+    archive_name = f'A.R.T-Linux-amd64-v{args.version}.zip' if args.version else 'A.R.T-Linux-amd64.zip'
+    ARCHIVE = ROOT / archive_name
+
     print(f'\n{"=" * 40}\n{" " * 11}A.R.T Builder{" " * 15}\n{"=" * 40}')
+    if args.version:
+        print(f'> Version: {args.version}')
 
     # Step 1: Clean
     _log('1/4', 'Cleaning build artifacts...')
