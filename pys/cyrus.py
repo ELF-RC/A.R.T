@@ -802,18 +802,60 @@ def _super_images_to_process(super_dir):
     if not has_a_suffix:
         return [(image, partition_name(image)) for image in images if os.path.getsize(image) > 0]
 
-    selected = []
+    # 按 canonical 分区名分组 _a / _b / 无后缀
+    a_parts = {}
+    b_parts = {}
+    other_parts = {}
     for image in images:
-        stem = os.path.basename(image).rsplit('.', 1)[0]
-        if stem.endswith('_b') or os.path.getsize(image) == 0:
-            continue
+        p = Path(image)
+        stem = p.stem
         if stem.endswith('_a'):
-            partition = stem[:-2]
-            canonical = os.path.join(super_dir, f'{partition}.img')
-            shutil.copy2(image, canonical)
-            selected.append((canonical, partition))
+            a_parts[stem[:-2]] = p
+        elif stem.endswith('_b'):
+            b_parts[stem[:-2]] = p
         else:
-            selected.append((image, partition_name(image)))
+            if p.stat().st_size > 0:
+                other_parts[stem] = p
+
+    selected = []
+    for part in sorted(set(a_parts) | set(b_parts)):
+        pa = a_parts.get(part)
+        pb = b_parts.get(part)
+        size_a = pa.stat().st_size if pa and pa.exists() else 0
+        size_b = pb.stat().st_size if pb and pb.exists() else 0
+
+        if size_a == 0 and size_b == 0:
+            # 两侧均为 0B，全部删除
+            for p in (pa, pb):
+                if p and p.exists():
+                    p.unlink()
+        elif size_a > 0 and size_b > 0:
+            # A/B 双槽均有效，保留 _a/_b 各自独立分解
+            selected.append((str(pa), f'{part}_a'))
+            selected.append((str(pb), f'{part}_b'))
+        elif size_a > 0:
+            # 仅 A 槽有内容，删除 B，A 重命名为 canonical
+            if pb and pb.exists():
+                pb.unlink()
+            dest = Path(super_dir) / f'{part}.img'
+            if dest.exists():
+                dest.unlink()
+            pa.rename(dest)
+            selected.append((str(dest), part))
+        else:
+            # 仅 B 槽有内容，删除 A，B 重命名为 canonical
+            if pa and pa.exists():
+                pa.unlink()
+            dest = Path(super_dir) / f'{part}.img'
+            if dest.exists():
+                dest.unlink()
+            pb.rename(dest)
+            selected.append((str(dest), part))
+
+    # 无后缀的非 VAB 分区直接加入
+    for part, image in sorted(other_parts.items()):
+        selected.append((str(image), part))
+
     return selected
 
 
