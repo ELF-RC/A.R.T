@@ -1671,11 +1671,11 @@ def menu_main():
         print('\n')
         print('\x1b[0;32m\t   1 > 分解 [bin]            2 > 分解 [dat.br]        \x1b[0m\n')
         print('\x1b[0;36m\t   3 > 分解 [dat]            4 > 分解 [img]\x1b[0m\n')
-        print('\x1b[0;33m\t   5 > 分解 [win]               \x1b[0m\n')
+        print('\x1b[0;33m\t   5 > 分解 [win]            6 > 分解 [super]\x1b[0m\n')
         print('\n')
         print('\x1b[0;35m\t   7 > 合成 [super]          8 > 插件 [sub]\x1b[0m\n')
         print('\x1b[0;34m\t   9 > 合成 [img]           10 > 合成 [dat]\x1b[0m\n')
-        print('\x1b[0;32m\t  11 > 合成 [dat.br]\x1b[0m\n')
+        print('\x1b[0;32m\t  11 > 合成 [dat.br]        12 > 合成 [bin]\x1b[0m\n')
         print('-------------------------------------------------------------')
         option = input(f'> {RED}输入序号{CLOSE} >> ')
         if not option.isdigit():
@@ -1683,7 +1683,7 @@ def menu_main():
             continue
 
         option = int(option)
-        valid_options = {0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 55, 66, 88}
+        valid_options = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 55, 66, 88}
         if option not in valid_options:
             input(f'> 无效序号: {option}')
             continue
@@ -1708,6 +1708,16 @@ def menu_main():
                 infile.append(i)
             quiet()
             decompress_win(list(set(sorted(infile))))
+        elif int(option) == 6:
+            from pys import lpunpack2
+            lpunpack2.main()
+            input('> 任意键继续')
+            continue
+        elif int(option) == 12:
+            from pys import mkbin
+            mkbin.main()
+            input('> 任意键继续')
+            continue
         elif int(option) in [9, 10, 11]:
             quiet()
             if int(option) == 9:
