@@ -1571,7 +1571,6 @@ def menu_super():
 
     with CoastTime():
         repack_super(selected, super_type, super_sparse)
-    input('> 任意键继续')
 
 
 def menu_modules():
