@@ -112,10 +112,10 @@ def _show_partitions(partitions):
         return []
 
     print(f'\n{BOLD}发现 {len(partitions)} 个分区：{CLOSE}\n')
-    print(f'  {"序号":>4}  {"分区名":<20} {"组":<12} {"大小":>10}')
-    print(f'  {"----":>4}  {"-" * 20} {"-" * 12} {"-" * 10}')
+    print(f'  {"序号":>4}  {"分区名":<20} {"组":<16} {"大小":>1}')
+    print(f'  {"----":>6}  {"-" * 20} {"-" * 18} {"-" * 10}')
     for i, (name, group, size) in enumerate(partitions, 1):
-        print(f'  {i:>4}  {name:<20} {group:<12} {_human_size(size):>10}')
+        print(f'  {i:>4}    {name:<20} {group:<18} {_human_size(size):>9}')
 
     print(f'\n{YELLOW}请输入要提取的分区序号（多个用逗号分隔，如 1,3,5）：{CLOSE}')
     print(f'{YELLOW}  输入 0 跳过（不提取任何分区）{CLOSE}')
@@ -166,15 +166,7 @@ def _extract_selected(super_img_path, out_dir, partitions, selected_indices):
             SHOW_INFO=False,
         )
         job.unpack()
-        print(f'\n{GREEN}> 提取完成！文件已输出到 {out_dir}{CLOSE}')
-        # 打印输出文件清单
-        files = sorted(Path(out_dir).glob('*.img'))
-        if files:
-            print(f'\n输出文件：')
-            for f in files:
-                print(f'  {GREEN}✓{CLOSE} {f.name} ({_human_size(f.stat().st_size)})')
-        else:
-            print(f'  {RED}⚠ 未找到输出文件{CLOSE}')
+        print(f'\n{GREEN}> 提取完成！文件已输出到 {out_dir}{CLOSE}\n')
     except Exception as e:
         print(f'{RED}> 提取失败: {e}{CLOSE}')
 
@@ -196,14 +188,14 @@ def main():
     else:
         print(f'\n          {RED}[!] 未找到 INPUT 目录，请确认运行位置正确{CLOSE}')
         print()
-        input('          按回车退出...')
+        input('> 任意键继续')
         return
 
     super_path = os.path.join(input_dir, 'super.img')
     if not os.path.isfile(super_path):
         print(f'\n{RED}> INPUT 目录下未发现 super.img{CLOSE}')
         print(f'> 请将 super.img 放入 {input_dir}')
-        input('          按回车退出...')
+        input('> 任意键继续')
         return
 
     if not out_dir:
@@ -222,7 +214,7 @@ def main():
 
     if not partitions:
         print(f'{RED}> super.img 内未发现分区或解析失败{CLOSE}')
-        input('          按回车退出...')
+        input('> 任意键继续')
         return
 
     selected = _show_partitions(partitions)
@@ -230,7 +222,6 @@ def main():
     if selected:
         _extract_selected(super_path, out_dir, partitions, selected)
 
-    input('\n          按回车退出...')
 
 
 if __name__ == '__main__':
