@@ -11,6 +11,7 @@ import sys
 import tarfile
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from glob import glob
 from pathlib import Path
@@ -1169,6 +1170,35 @@ def _human_size(b):
         return f"{b / (1024 * 1024 * 1024):.2f} GB"
 
 
+def _list_dat_partitions(infile):
+    """Scan dat.br/dat files, pair with transfer.list, return sorted list of dicts."""
+    items = []
+    for part in sorted(infile):
+        if not os.path.isfile(part):
+            continue
+        transfer = os.path.join(os.path.dirname(part), os.path.basename(part).split('.')[0] + '.transfer.list')
+        if not os.path.isfile(transfer):
+            print(f'> 跳过 {os.path.basename(part)}：未找到 transfer.list')
+            continue
+        name = partition_name(part)
+        size = os.path.getsize(part)
+        items.append({"path": part, "transfer": transfer, "partition": name, "size": size})
+    return items
+
+
+def _decompress_single_partition(item, flag):
+    """Worker for parallel dat.br/dat decomposition. Returns result dict."""
+    name = item["partition"]
+    try:
+        if flag == 2:
+            decompress_bro(item["transfer"], item["path"])
+        elif flag == 3:
+            decompress_dat(item["transfer"], item["path"])
+        return {"partition": name, "success": True, "error": None}
+    except (LayoutError, OSError, ValueError, sdat2img.SdatError) as error:
+        return {"partition": name, "success": False, "error": str(error)}
+
+
 def _decompress_payload_images(payload, payload_dir, mode):
     payload_partitions = extract_payload.info(payload)
     if mode == '1':
@@ -1288,25 +1318,64 @@ def decompress_win(infile_list):
 
 
 def decompress(infile, flag=4):
+    # flag 2/3 (dat.br/dat): selection + parallel execution
+    if flag in (2, 3):
+        items = _list_dat_partitions(infile)
+        if not items:
+            print(f'> 未发现可用的 {"dat.br" if flag == 2 else "dat"} 文件')
+            return
+
+        # Selection phase
+        if not V.JM:
+            label = "dat.br" if flag == 2 else "dat"
+            print(f'\n> 发现以下 {label} 文件：\n')
+            for i, it in enumerate(items, 1):
+                print(f'  {YELLOW}[{i:>2}]{CLOSE}\t{GREEN}{os.path.basename(it["path"])}{CLOSE}')
+            print(f'\n{YELLOW}请输入要分解的序号（多个用逗号分隔，0跳过）{CLOSE}')
+            ans = input('> ').strip()
+            if not ans or ans == '0':
+                return
+            selected = []
+            for token in ans.replace('，', ',').split(','):
+                token = token.strip()
+                if not token:
+                    continue
+                try:
+                    idx = int(token)
+                    if 1 <= idx <= len(items):
+                        selected.append(items[idx - 1])
+                    else:
+                        print(f'  {RED}无效序号: {idx}{CLOSE}')
+                except ValueError:
+                    print(f'  {RED}无法解析: {token}{CLOSE}')
+            if not selected:
+                print('> 未选择任何分区')
+                return
+        else:
+            selected = items
+
+        # Parallel execution phase
+        workers = min(len(selected), os.cpu_count() or 2)
+        print(f'\n> 并行分解中......\n')
+        ok, fail = 0, 0
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_decompress_single_partition, it, flag): it for it in selected}
+            for future in as_completed(futures):
+                result = future.result()
+                if result["success"]:
+                    print(f'  {GREEN}✓{CLOSE} {result["partition"]}')
+                    ok += 1
+                else:
+                    print(f'  {RED}✗{CLOSE} {result["partition"]}: {result["error"]}')
+                    fail += 1
+        print(f'\n> 分解完成: {ok}/{ok + fail} 成功')
+        return
+
+    # flag 4 (img): sequential with per-file confirmation
     for part in sorted(infile):
         if not os.path.isfile(part):
             continue
         try:
-            if flag < 4:
-                transfer = os.path.join(os.path.dirname(part), os.path.basename(part).split('.')[0] + '.transfer.list')
-                if not os.path.isfile(transfer):
-                    print(f'> 跳过 {os.path.basename(part)}：未找到 transfer.list')
-                    continue
-                if not V.JM:
-                    display(f'是否分解: {os.path.basename(part)} [1/0]: ', 2, '')
-                    if input() != '1':
-                        continue
-                if flag == 2:
-                    decompress_bro(transfer, part)
-                elif flag == 3:
-                    decompress_dat(transfer, part)
-                continue
-
             if os.path.basename(part) in ('dsp.img', 'cust.img'):
                 continue
             if gettype.gettype(part) not in ('ext', 'sparse', 'erofs', 'super', 'boot', 'vendor_boot'):
