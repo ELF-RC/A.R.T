@@ -48,7 +48,7 @@ class GlobalValue(object):
 
     def __init__(self):
         self.programs = ["cpio", "brotli", "img2simg", "e2fsck", "resize2fs",
-                         "mke2fs", "e2fsdroid", "mkfs.erofs", "lpmake", "extract.erofs", "magiskboot"]
+                         "mke2fs", "e2fsdroid", "mkfs.erofs", "lpmake", "extract.erofs", "magiskboot", "avbroot"]
 
     def __getattr__(self, item):
         try:

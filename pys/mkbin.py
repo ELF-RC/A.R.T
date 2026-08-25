@@ -1,15 +1,18 @@
-"""MKBIN - 预发布功能"""
+"""MKBIN - avbroot 工具入口"""
 
 import os
-import sys
+import subprocess
+
+from pys.cyrus import BIN_PATH
 
 
 def main():
     os.system("clear")
-    print('\n' * 10)
-    print('\x1b[1;33m     mkbin.py     预发布功能，敬请期待！\x1b[0m')
-    print('\n' * 5)
-    input('\n          按回车键退出...')
+    avbroot = os.path.join(BIN_PATH, "avbroot")
+    if not os.path.isfile(avbroot):
+        print(f'\x1b[91m> 未找到 avbroot 二进制: {avbroot}\x1b[0m')
+        return
+    subprocess.run([avbroot, "--version"])
 
 
 if __name__ == '__main__':
