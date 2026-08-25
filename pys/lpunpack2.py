@@ -180,33 +180,23 @@ def main():
     out_dir = _get_out_dir()
 
     print('\n' * 8)
-    print(f'{YELLOW}          lpunpack2.py — super 分区选择性提取{CLOSE}')
+    print(f'{YELLOW}          super 分区选择性提取{CLOSE}')
     print()
     print(f'{YELLOW}          请将 super.img 放入 INPUT 目录{CLOSE}')
-    if input_dir:
-        print(f'\n          INPUT: {input_dir}')
-    else:
+    print()
+    input('          准备好后按回车继续...')
+
+    if not input_dir:
         print(f'\n          {RED}[!] 未找到 INPUT 目录，请确认运行位置正确{CLOSE}')
-        print()
-        input('> 任意键继续')
         return
 
     super_path = os.path.join(input_dir, 'super.img')
     if not os.path.isfile(super_path):
-        print(f'\n{RED}> INPUT 目录下未发现 super.img{CLOSE}')
-        print(f'> 请将 super.img 放入 {input_dir}')
-        input('> 任意键继续')
+        print(f'\n          {RED}INPUT 目录下未发现 super.img ！{CLOSE}\n')
         return
 
     if not out_dir:
         out_dir = input_dir.replace('INPUT', 'OUT') + os.sep
-        if not os.path.isdir(out_dir):
-            print(f'\n{YELLOW}[!] 未找到 OUT 目录，将输出到：{out_dir}{CLOSE}')
-    else:
-        print(f'\n          OUT: {out_dir}')
-
-    print()
-    input('          准备好后按回车继续...')
 
     os.system("clear")
     print(f'\n{BOLD}> 正在读取 super 元数据...{CLOSE}')
