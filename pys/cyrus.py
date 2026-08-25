@@ -1784,7 +1784,7 @@ def menu_main():
         print('\n')
         print('\x1b[0;35m\t   7 > 合成 [super]          8 > 插件 [sub]\x1b[0m\n')
         print('\x1b[0;34m\t   9 > 合成 [img]           10 > 合成 [dat]\x1b[0m\n')
-        print('\x1b[0;32m\t  11 > 合成 [dat.br]        12 > 合成 [bin]\x1b[0m\n')
+        print('\x1b[0;32m\t  11 > 合成 [dat.br]        12 > 更多 [more]\x1b[0m\n')
         print('-------------------------------------------------------------')
         option = input(f'> {RED}输入序号{CLOSE} >> ')
         if not option.isdigit():
@@ -1823,9 +1823,8 @@ def menu_main():
             input('> 任意键继续')
             continue
         elif int(option) == 12:
-            from pys import mkbin
-            mkbin.main()
-            input('> 任意键继续')
+            from pys import more
+            more.main()
             continue
         elif int(option) in [9, 10, 11]:
             quiet()

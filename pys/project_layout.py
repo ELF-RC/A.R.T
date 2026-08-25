@@ -18,7 +18,7 @@ class UnsupportedLayoutError(LayoutError):
 
 
 _SAFE_COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
-_ROOT_DIRS = frozenset({"INPUT", "OUT", "WORKSPACE"})
+_ROOT_DIRS = frozenset({"INPUT", "OUT", "WORKSPACE", "OTA_WORK"})
 _RESERVED_WORKSPACE_NAMES = frozenset({"config", "INPUT", "OUT", "WORKSPACE"})
 
 
@@ -56,12 +56,22 @@ class ProjectLayout:
         return self.workspace_dir / "config"
 
     @property
+    def ota_work_dir(self) -> Path:
+        return self.project_dir / "OTA_WORK"
+
+    @property
+    def ota_patch_dir(self) -> Path:
+        return self.ota_work_dir / "patch"
+
+    @property
     def required_dirs(self) -> tuple[Path, ...]:
         return (
             self.input_dir,
             self.out_dir,
             self.workspace_dir,
             self.config_dir,
+            self.ota_work_dir,
+            self.ota_patch_dir,
         )
 
     @staticmethod
