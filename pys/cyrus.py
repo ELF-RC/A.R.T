@@ -1748,6 +1748,7 @@ def tool_info():
   Google (Apache-2.0)      - brotli
   Meta (BSD-3-Clause)      - zstd
   dtc (GPL-2.0)            - dtc
+  avbroot (GPL-3.0)        - avbroot (chenxiaolong)
 
 \x1b[1;33m协议:\x1b[0m
   本工具使用 AGPL-3.0 协议
