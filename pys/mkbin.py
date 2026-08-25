@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """MKBIN - 预发布功能"""
 
 import os

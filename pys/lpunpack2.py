@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """LP Unpack v2 - super 分区选择性提取工具。
 支持：预览 super.img 内所有分区（名称+大小+组），用户勾选后只提取选中项，
       输出到 OUT 目录。sparse 自动 unsparse。原 lpunpack.py 不动。
