@@ -354,12 +354,17 @@ class Dumper:
 
 
 def info(payloadfile):
-    """Return payload partition names for the interactive extractor."""
+    """Return list of (partition_name, size_bytes) for the interactive extractor."""
     dumper = Dumper(payloadfile, out="")
     try:
-        return " ".join(part.partition_name for part in dumper.dam.partitions)
+        return [(part.partition_name, part.new_partition_info.size) for part in dumper.dam.partitions]
     finally:
         dumper.payloadfile.close()
+
+
+def info_names(payloadfile):
+    """Return payload partition names as a space-separated string (legacy)."""
+    return " ".join(name for name, _ in info(payloadfile))
 
 
 def run(payloadfile, out, partition):

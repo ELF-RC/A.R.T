@@ -1158,15 +1158,35 @@ def decompress_bro(transfer, source, distance=None, keep=0):
                     pass
 
 
+def _human_size(b):
+    if b < 1024:
+        return f"{b} B"
+    elif b < 1024 * 1024:
+        return f"{b / 1024:.1f} KB"
+    elif b < 1024 * 1024 * 1024:
+        return f"{b / (1024 * 1024):.1f} MB"
+    else:
+        return f"{b / (1024 * 1024 * 1024):.2f} GB"
+
+
 def _decompress_payload_images(payload, payload_dir, mode):
-    payload_partitions = extract_payload.info(payload).split()
+    payload_partitions = extract_payload.info(payload)
     if mode == '1':
         print(f"> {YELLOW}包含的所有镜像文件: {CLOSE}\n")
-        print(' '.join(payload_partitions))
+        name_w = max(len(name) for name, _ in payload_partitions) + 4
+        size_w = 10
+        cols = 2
+        for i, (name, size) in enumerate(payload_partitions):
+            print(f"  {GREEN}{name}{CLOSE}".ljust(name_w + len(GREEN) + len(CLOSE)),
+                  f"{_human_size(size):>{size_w}}", end='')
+            if (i + 1) % cols == 0:
+                print()
+        print()
+        name_set = {name for name, _ in payload_partitions}
         partitions = input(
             f"> {RED}根据以上信息输入一个或多个镜像，以空格分开{CLOSE}\n> {MAGENTA}").split()
         for partition in partitions:
-            if partition in payload_partitions:
+            if partition in name_set:
                 extract_payload.run(payload, payload_dir, partition)
     else:
         print(f"> {YELLOW}提取【{os.path.basename(payload)}】所有镜像文件:{CLOSE}\n")
