@@ -60,8 +60,16 @@ class ProjectLayout:
         return self.project_dir / "OTA_WORK"
 
     @property
-    def ota_patch_dir(self) -> Path:
-        return self.ota_work_dir / "patch"
+    def ota_signkey_dir(self) -> Path:
+        return self.ota_work_dir / "sign-key"
+
+    @property
+    def ota_stockzip_dir(self) -> Path:
+        return self.ota_work_dir / "stock-zip"
+
+    @property
+    def ota_inputimg_dir(self) -> Path:
+        return self.ota_work_dir / "input-img"
 
     @property
     def required_dirs(self) -> tuple[Path, ...]:
@@ -71,7 +79,9 @@ class ProjectLayout:
             self.workspace_dir,
             self.config_dir,
             self.ota_work_dir,
-            self.ota_patch_dir,
+            self.ota_signkey_dir,
+            self.ota_stockzip_dir,
+            self.ota_inputimg_dir,
         )
 
     @staticmethod
