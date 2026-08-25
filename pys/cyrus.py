@@ -596,7 +596,7 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
                 pass
         if os.path.isfile(new_distance):
             print(" Done")
-            if V.SETUP_MANIFEST['REPACK_SPARSE_IMG'] == '1' or flag > 8:
+            if V.SETUP_MANIFEST['REPACK_SPARSE_IMG'] == '1' or flag > 9:
                 display("开始转换: sparse format ...")
                 call(['img2simg', new_distance, distance])
                 try:
@@ -617,7 +617,7 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
                     pass
         if os.path.isfile(new_distance):
             print(" Done")
-            if V.SETUP_MANIFEST['REPACK_SPARSE_IMG'] == '1' or flag > 8:
+            if V.SETUP_MANIFEST['REPACK_SPARSE_IMG'] == '1' or flag > 9:
                 display("开始转换: sparse format ...")
                 call(['img2simg', new_distance, distance])
                 try:
@@ -655,14 +655,14 @@ def recompress(source, fsconfig, contexts, dumpinfo, flag=8):
                     elif f"resize {label}_a " in line:
                         line = f"resize {label}_a {renew_size}\n"
                     f_w.write(line)
-        if flag > 8:
+        if flag > 9:
             display(f"重新生成: {label}.new.dat ...", 3)
             img2sdat.main(distance, V.out, 4, label)
             newdat = V.out + label + ".new.dat"
             if os.path.isfile(newdat):
                 print(" Done")
                 os.remove(distance)
-                if flag == 10:
+                if flag == 11:
                     level = V.SETUP_MANIFEST["REPACK_BR_LEVEL"]
                     display(f"重新生成: {label}.new.dat.br | Level={level} ...", 3)
                     newdat_brotli = newdat + ".br"
