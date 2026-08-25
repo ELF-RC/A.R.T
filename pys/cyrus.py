@@ -226,37 +226,57 @@ def validate_default_env_setup(setup_manifest):
 
 
 def env_setup():
-    question_list = {
-        '合成镜像类型[0:EXT4/1:EROFS]': "REPACK_EROFS_IMG",
-        '合成镜像格式[0:RAW/1:SPARSE]': "REPACK_SPARSE_IMG",
-        '合成EXT4动态分区状态[0:RO/1:RW]': "REPACK_TO_RW",
-        '合成EXT4压缩分区空间[0/1]': "RESIZE_IMG",
-        '合成EROFS压缩算法[0:NO/1:LZ4HC/2:LZ4]': "RESIZE_EROFSIMG",
-        'EROFS压缩等级[1]': "EROFS_LEVEL",
-        'EROFS旧内核兼容[0/1]': "EROFS_OLD_KERNEL",
-        '压缩BROTLI等级[0-9|3]': "REPACK_BR_LEVEL",
-        '动态分区簇名称[qti_dynamic_partitions]': "GROUP_NAME",
-        '动态SUPER分区总大小[9126805504]': "SUPER_SIZE",
-        '自定义UTC时间戳[live]': "UTC",
-        '分段DAT/IMG支持个数[15]': "UNPACK_SPLIT_DAT",
-        '跳过Ramdisk解包打包[0/1]': "BOOT_SKIP_RAMDISK"}
+    # 分类后的设置项：(显示名, JSON key)
+    categories = [
+        ('EXT4', [
+            ('合成EXT4动态分区状态[0:RO/1:RW]', 'REPACK_TO_RW'),
+            ('合成EXT4压缩分区空间[0/1]', 'RESIZE_IMG'),
+        ]),
+        ('EROFS', [
+            ('合成EROFS压缩算法[0:NO/1:LZ4HC/2:LZ4]', 'RESIZE_EROFSIMG'),
+            ('EROFS压缩等级[1]', 'EROFS_LEVEL'),
+            ('EROFS旧内核兼容[0/1]', 'EROFS_OLD_KERNEL'),
+        ]),
+        ('SUPER', [
+            ('动态分区簇名称[qti_dynamic_partitions]', 'GROUP_NAME'),
+            ('动态SUPER分区总大小[9126805504]', 'SUPER_SIZE'),
+        ]),
+        ('IMG', [
+            ('合成镜像类型[0:EXT4/1:EROFS]', 'REPACK_EROFS_IMG'),
+            ('合成镜像格式[0:RAW/1:SPARSE]', 'REPACK_SPARSE_IMG'),
+        ]),
+        ('BOOT', [
+            ('跳过Ramdisk解包打包[0/1]', 'BOOT_SKIP_RAMDISK'),
+        ]),
+        ('Other', [
+            ('压缩BROTLI等级[0-9|3]', 'REPACK_BR_LEVEL'),
+            ('自定义UTC时间戳[live]', 'UTC'),
+            ('分段DAT/IMG支持个数[15]', 'UNPACK_SPLIT_DAT'),
+        ]),
+    ]
+    # 生成平铺映射：序号 → (显示名, JSON key)
+    flat_map = {}
+    for _, items in categories:
+        for name, key in items:
+            flat_map[len(flat_map) + 1] = (name, key)
     while True:
         os.system("clear")
         print(f"\n> {GREEN}设置文件{CLOSE}: {SETUP_JSON.replace(PWD_DIR, '')}")
-        i = 1
-        data1 = {}
         with open(SETUP_JSON, 'r', encoding='utf-8') as ss:
             data = json.load(ss)
-        for (name, value) in question_list.items():
-            print(f"{YELLOW}[{'0' if i < 10 else ''}{i}]{CLOSE}\t{BOLD}{name}{CLOSE}: {GREEN}{data[value]}{CLOSE}")
-            data1[f"{'0' if i < 10 else ''}{i}"] = name
-            i += 1
+        i = 1
+        for category, items in categories:
+            print(f"\n  {CYAN}[{category}]{CLOSE}")
+            for name, key in items:
+                print(f"  {YELLOW}[{'0' if i < 10 else ''}{i}]{CLOSE}\t{BOLD}{name}{CLOSE}: {GREEN}{data[key]}{CLOSE}")
+                i += 1
         sum_ = input(f"\n请输入你要更改的序列，输入{YELLOW}00{CLOSE}为返回：")
         if sum_ in ["00", "0"]:
             return
-        if sum_ not in data1.keys():
+        if not sum_.isdigit() or int(sum_) not in flat_map:
             continue
-        data[question_list[data1[sum_]]] = input(data1[sum_] + "：")
+        name, key = flat_map[int(sum_)]
+        data[key] = input(name + "：")
         validate_default_env_setup(data)
         with open(SETUP_JSON, 'w', encoding='utf-8') as ss:
             json.dump(data, ss, ensure_ascii=False, indent=4)
