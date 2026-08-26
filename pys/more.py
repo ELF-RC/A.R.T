@@ -15,7 +15,7 @@ def main():
         print(f'\n{BOLD}> 更多功能{CLOSE}\n')
         print(f'  {YELLOW}[00]{CLOSE}\t返回上级菜单')
         print()
-        print(f'  {GREEN}[01]{CLOSE}\t修补payload.bin卡刷包')
+        print(f'  {GREEN}[01]{CLOSE}\t生成payload.bin卡刷包')
         print()
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
         if not choice.isdigit():
