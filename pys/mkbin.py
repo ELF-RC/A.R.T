@@ -160,6 +160,59 @@ def _delete_keys():
         print(f'\n{YELLOW}> 密钥目录为空{CLOSE}')
 
 
+def _list_zips():
+    """List all .zip files in stock-zip directory."""
+    d = _stockzip_dir()
+    if not d or not d.is_dir():
+        return []
+    return sorted(f.name for f in d.iterdir() if f.suffix.lower() == '.zip' and f.is_file())
+
+
+def _select_ota():
+    """Select an OTA zip from stock-zip directory."""
+    sf = _select_file()
+    if not sf:
+        print(f'> {RED}无法获取 stock-zip 目录{CLOSE}')
+        input('> 按回车继续')
+        return
+
+    zips = _list_zips()
+
+    if len(zips) == 0:
+        sf.write_text('', encoding='utf-8')
+        print(f'> {YELLOW}OTA_WORK/stock-zip 内未发现任何 zip 包{CLOSE}')
+        input('> 按回车继续')
+        return
+
+    if len(zips) == 1:
+        sf.write_text(zips[0], encoding='utf-8')
+        print(f'> {GREEN}已选择：{zips[0]}{CLOSE}')
+        input('> 按回车继续')
+        return
+
+    print()
+    print(f'  {"序号":>4}      文件名')
+    print(f'  {"----":>6}    {"-" * 40}')
+    for i, name in enumerate(zips, 1):
+        print(f'  {i:>4}      {name}')
+
+    print(f'\n  请输入目标OTA包序号：')
+    ans = input('> ').strip()
+    if not ans.isdigit():
+        print(f'> {RED}无效输入{CLOSE}')
+        input('> 按回车继续')
+        return
+    idx = int(ans)
+    if idx < 1 or idx > len(zips):
+        print(f'> {RED}无效序号: {idx}{CLOSE}')
+        input('> 按回车继续')
+        return
+
+    sf.write_text(zips[idx - 1], encoding='utf-8')
+    print(f'> {GREEN}已选择：{zips[idx - 1]}{CLOSE}')
+    input('> 按回车继续')
+
+
 def _show_status():
     """Print current status."""
     ks = _key_status()
@@ -221,8 +274,8 @@ def main():
             print(f'\n{YELLOW}> 禁用AVB修补功能待实现{CLOSE}')
             input('> 任意键继续')
         elif choice == '07':
-            print(f'\n{YELLOW}> 选择OTA包功能待实现{CLOSE}')
-            input('> 任意键继续')
+            _select_ota()
+            continue
         else:
             input(f'> 无效序号: {choice}')
 
