@@ -5,6 +5,7 @@ import os
 YELLOW = '\x1b[1;33m'
 GREEN = '\x1b[1;32m'
 RED = '\x1b[91m'
+CYAN = '\x1b[1;36m'
 BOLD = '\x1b[1m'
 CLOSE = '\x1b[0m'
 
@@ -17,6 +18,8 @@ def main():
         print()
         print(f'  {GREEN}[01]{CLOSE}\t生成payload.bin卡刷包')
         print()
+        print(f'  {CYAN}[02]{CLOSE}\t镜像签名与VBMeta工具')
+        print()
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
         if not choice.isdigit():
             continue
@@ -25,6 +28,10 @@ def main():
         elif choice == '01':
             from pys import mkbin
             mkbin.main()
+            input('> 任意键继续')
+        elif choice == '02':
+            from pys import avbtool
+            avbtool.main()
             input('> 任意键继续')
         else:
             input(f'> 无效序号: {choice}')
