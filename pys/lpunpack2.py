@@ -69,22 +69,20 @@ def _human_size(b):
 # 核心：读取 super 元数据，返回分区列表 [(name, group, size_bytes), ...]
 # ---------------------------------------------------------------------------
 def _list_partitions(super_img_path):
-    """Parse super metadata and return sorted partition info list."""
-    # 直接复用 LpUnpack.get_info() 获取元数据
-    # get_info() 内部会做 sparse 检测和 metadata 读取，最后关闭 fd
-    # 所以我们在外面自己控制 sparse 检测，然后调 _read_metadata
+    """Parse super metadata and return (sorted_partition_info, effective_img_path)."""
     job = _lp.LpUnpack(SUPER_IMAGE=super_img_path, SHOW_INFO=False)
-    # 手动做 sparse 检测（与 get_info 内部逻辑一致）
+    effective_path = super_img_path
+    # sparse 检测：只转换一次，后续复用转换结果
     if _lp.SparseImage(job._fd).check():
         print('Sparse image detected.')
         print('Process conversion to non sparse image...')
         unsparse_file = _lp.SparseImage(job._fd).unsparse()
         job._fd.close()
-        job._fd = open(str(unsparse_file), 'rb')
+        effective_path = str(unsparse_file)
+        job._fd = open(effective_path, 'rb')
         print('Result:[ok]')
     job._fd.seek(0)
     metadata = job._read_metadata()
-    # 不关闭 fd，避免 get_info 的 finally 块误关
     result = []
     for p in metadata.partitions:
         size = 0
@@ -98,7 +96,7 @@ def _list_partitions(super_img_path):
         result.append((p.name, group, size))
     job._fd.close()
     result.sort(key=lambda x: (-x[2], x[0]))  # 大->小，同大小按名字
-    return result
+    return result, effective_path
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +197,7 @@ def main():
 
     os.system("clear")
     print(f'\n{BOLD}> 正在读取 super 元数据...{CLOSE}')
-    partitions = _list_partitions(super_path)
+    partitions, effective_path = _list_partitions(super_path)
 
     if not partitions:
         print(f'{RED}> super.img 内未发现分区或解析失败{CLOSE}')
@@ -209,7 +207,7 @@ def main():
     selected = _show_partitions(partitions)
 
     if selected:
-        _extract_selected(super_path, out_dir, partitions, selected)
+        _extract_selected(effective_path, out_dir, partitions, selected)
 
 
 

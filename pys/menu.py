@@ -116,8 +116,9 @@ def menu_once():
                                 f"\x1b[0;31m> 是否删除 \x1b[0;34mNo.{which} \x1b[0;31m工程: \x1b[0;32m{os.path.basename(V.dict0[int(which)])}\x1b[0;31m [0/1]:\x1b[0m ") == "1":
                             if os.path.isdir(V.dict0[int(which)]):
                                 rmdire(V.dict0[int(which)])
-                                continue
-                    input(f"> Number {which} Error !")
+                    else:
+                        input(f"> Number {which} Error !")
+                    continue
         elif int(choice) == 44:
             env_setup()
             load_setup_json()
