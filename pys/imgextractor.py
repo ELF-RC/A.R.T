@@ -201,10 +201,10 @@ class ULTRAMAN(object):
         return True
 
     def LEMON(self, target):
-        from pys import gettype
+        from pys.utils import gettype, findfile
         if not os.path.exists(target):
             return 0
-        target_type = gettype.gettype(target)
+        target_type = gettype(target)
         if target_type == 'sparse':
             return self.__ImgSizeFromSparseFile(target)
         else:

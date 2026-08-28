@@ -14,7 +14,10 @@ def exception_handler(exception_type, exception, traceback):
 
 
 def init():
-    cyrus.check_permissions()
+    from pys.config import check_permissions
+    from pys.menu import menu_once
+    check_permissions()
+    menu_once()
 
 
 if __name__ == '__main__':

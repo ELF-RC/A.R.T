@@ -13,7 +13,7 @@ import zstandard
 from rich.progress import Progress, BarColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
 
 from pys import update_metadata_pb2 as um
-from pys.project_layout import ProjectLayout
+from pys.workspace import ProjectLayout
 
 flatten = lambda l: [item for sublist in l for item in sublist]
 
