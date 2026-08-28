@@ -1499,7 +1499,7 @@ def extract_zrom(rom):
     menu_main()
 
 
-_RESERVED_MENU_IDS = {22, 44, 66, 88}
+_RESERVED_MENU_IDS = {44, 66, 88}
 
 
 def lists_project(dTitle, sPath, flag):
@@ -1789,7 +1789,7 @@ def menu_main():
             lpunpack2.main()
             input('> 任意键继续')
             continue
-        elif int(option) in (55, 88):
+        elif int(option) == 88:
             from pys import tool_info as _ti
             _ti.show()
             continue
