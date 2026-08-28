@@ -78,10 +78,6 @@ class ProjectLayout:
             self.out_dir,
             self.workspace_dir,
             self.config_dir,
-            self.ota_work_dir,
-            self.ota_signkey_dir,
-            self.ota_stockzip_dir,
-            self.ota_inputimg_dir,
         )
 
     @staticmethod

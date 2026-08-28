@@ -479,11 +479,20 @@ def _show_status():
         print(f'  目标OTA包：{YELLOW}未选择{CLOSE}')
 
 
+def _ensure_ota_work_dirs():
+    """Create OTA_WORK and its subdirectories on first use."""
+    d = V.layout.ota_work_dir
+    for subdir in (d, d / 'sign-key', d / 'stock-zip', d / 'input-img'):
+        subdir.mkdir(parents=True, exist_ok=True)
+
+
 def main():
     avbroot = os.path.join(BIN_PATH, "avbroot")
     if not os.path.isfile(avbroot):
         print(f'\n{RED}> 未找到 avbroot 二进制: {avbroot}{CLOSE}')
         return
+
+    _ensure_ota_work_dirs()
 
     while True:
         os.system("clear")
