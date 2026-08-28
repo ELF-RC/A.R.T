@@ -17,6 +17,7 @@ def show():
 
 {YELLOW}项目链接:{CLOSE}
   GitHub: https://github.com/ELF-RC/A.R.T
+  原项目: https://github.com/ColdWindScholar/D.N.A3/
 
 {YELLOW}原工具开发者:{CLOSE}
   ColdWindScholar (3590361911@qq.com)

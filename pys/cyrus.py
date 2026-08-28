@@ -1729,8 +1729,6 @@ def _tool_info_handler():
 
 
 menu_actions = {
-    55: lambda: input(
-        "Github: https://github.com/ColdWindScholar/D.N.A3/\nWrote By ColdWindScholar (3590361911@qq.com)"),
     66: sys.exit,
     88: _tool_info_handler,
     8: menu_modules,
@@ -1761,7 +1759,7 @@ def menu_main():
             continue
 
         option = int(option)
-        valid_options = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 55, 66, 88}
+        valid_options = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 66, 88}
         if option not in valid_options:
             input(f'> 无效序号: {option}')
             continue
@@ -1790,6 +1788,10 @@ def menu_main():
             from pys import lpunpack2
             lpunpack2.main()
             input('> 任意键继续')
+            continue
+        elif int(option) in (55, 88):
+            from pys import tool_info as _ti
+            _ti.show()
             continue
         elif int(option) == 12:
             from pys import more
