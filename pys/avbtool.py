@@ -223,12 +223,17 @@ def cmd_erase_footer():
         input('> 按回车继续')
         return
 
+    base, ext = os.path.splitext(img)
+    out_img = f'{base}_unsign{ext}'
+    shutil.copy2(img, out_img)
+
     print(f'\n  去除签名: {img}')
-    ok = _run(['erase_footer', '--image', img])
+    ok = _run(['erase_footer', '--image', out_img])
     if ok:
         print('\n  Patch has been completed.')
     else:
         print(f'\n  {RED}> 失败{CLOSE}')
+        os.remove(out_img)
     input('> 按回车继续')
 
 
@@ -251,7 +256,7 @@ def main():
         print(f'\n{BOLD}> 镜像签名与VBMeta工具{CLOSE}\n')
         print(f'  {YELLOW}[00]{CLOSE}\t返回上级菜单')
         print()
-        print(f'  {YELLOW}[01]{CLOSE}\t解析VBMeta镜像信息')
+        print(f'  {YELLOW}[01]{CLOSE}\t解析镜像签名信息')
         print()
         print(f'  {GREEN}[02]{CLOSE}\t添加哈希签名 (小分区)')
         print()
@@ -259,7 +264,7 @@ def main():
         print()
         print(f'  {CYAN}[04]{CLOSE}\t验证镜像签名')
         print()
-        print(f'  {RED}[05]{CLOSE}\t去除镜像AVB签名')
+        print(f'  {CYAN}[05]{CLOSE}\t去除镜像签名')
         print()
 
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
