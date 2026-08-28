@@ -249,6 +249,11 @@ def main():
         '03': cmd_add_hashtree_footer,
         '04': cmd_verify_image,
         '05': cmd_erase_footer,
+        '1': cmd_info_image,
+        '2': cmd_add_hash_footer,
+        '3': cmd_add_hashtree_footer,
+        '4': cmd_verify_image,
+        '5': cmd_erase_footer,
     }
 
     while True:
