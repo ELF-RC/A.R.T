@@ -20,8 +20,10 @@ def main():
         print()
         print(f'  {CYAN}[02]{CLOSE}\t镜像签名与VBMeta工具')
         print()
+        VALID = {'00', '0', '01', '1', '02', '2'}
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
-        if not choice.isdigit():
+        if choice not in VALID:
+            input(f'> 无效序号: {choice}')
             continue
         if choice in ('00', '0'):
             return

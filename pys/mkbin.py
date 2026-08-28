@@ -509,8 +509,10 @@ def main():
         print(f'  {CYAN}[06]{CLOSE} 修补OTA(禁用AVB)        {CYAN}[07]{CLOSE} 选择OTA包')
 
         print()
+        VALID = {'00', '0', '01', '1', '02', '2', '03', '3', '04', '4', '05', '5', '06', '6', '07', '7'}
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
-        if not choice.isdigit():
+        if choice not in VALID:
+            input(f'> 无效序号: {choice}')
             continue
         if choice in ('00', '0'):
             return
