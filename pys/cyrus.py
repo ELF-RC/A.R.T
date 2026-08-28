@@ -1599,7 +1599,7 @@ def menu_once():
             env_setup()
             load_setup_json()
         elif int(choice) == 88:
-            tool_info()
+            from pys import tool_info as _ti; _ti.show()
         elif int(choice) == 0:
             if creat_project():
                 menu_main()
