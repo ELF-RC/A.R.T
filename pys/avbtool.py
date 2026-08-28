@@ -216,6 +216,22 @@ def cmd_verify_image():
     input('> 按回车继续')
 
 
+def cmd_erase_footer():
+    """[05] 去除镜像的AVB签名"""
+    img = _select_file('选择要去除签名的镜像')
+    if not img:
+        input('> 按回车继续')
+        return
+
+    print(f'\n  去除签名: {img}')
+    ok = _run(['erase_footer', '--image', img])
+    if ok:
+        print('\n  Patch has been completed.')
+    else:
+        print(f'\n  {RED}> 失败{CLOSE}')
+    input('> 按回车继续')
+
+
 def main():
     if not os.path.isfile(AVBTOOL):
         print(f'\n{RED}> 未找到 avbtool: {AVBTOOL}{CLOSE}')
@@ -227,6 +243,7 @@ def main():
         '02': cmd_add_hash_footer,
         '03': cmd_add_hashtree_footer,
         '04': cmd_verify_image,
+        '05': cmd_erase_footer,
     }
 
     while True:
@@ -241,6 +258,8 @@ def main():
         print(f'  {GREEN}[03]{CLOSE}\t添加哈希树签名 (大分区)')
         print()
         print(f'  {CYAN}[04]{CLOSE}\t验证镜像签名')
+        print()
+        print(f'  {RED}[05]{CLOSE}\t去除镜像AVB签名')
         print()
 
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
