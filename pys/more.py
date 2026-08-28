@@ -23,13 +23,13 @@ def main():
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
         if not choice.isdigit():
             continue
-        if choice == '00' or choice == '0':
+        if choice in ('00', '0'):
             return
-        elif choice == '01':
+        elif choice in ('01', '1'):
             from pys import mkbin
             mkbin.main()
             input('> 任意键继续')
-        elif choice == '02':
+        elif choice in ('02', '2'):
             from pys import avbtool
             avbtool.main()
             input('> 任意键继续')

@@ -514,24 +514,24 @@ def main():
             continue
         if choice in ('00', '0'):
             return
-        elif choice == '01':
+        elif choice in ('01', '1'):
             continue
-        elif choice == '02':
+        elif choice in ('02', '2'):
             _generate_keys()
             continue
-        elif choice == '03':
+        elif choice in ('03', '3'):
             _delete_keys()
             continue
-        elif choice == '04':
+        elif choice in ('04', '4'):
             _patch_ota_with_avb()
             continue
-        elif choice == '05':
+        elif choice in ('05', '5'):
             print(f'\n{YELLOW}> 验证功能待实现{CLOSE}')
             input('> 任意键继续')
-        elif choice == '06':
+        elif choice in ('06', '6'):
             _patch_ota_disable_avb()
             continue
-        elif choice == '07':
+        elif choice in ('07', '7'):
             _select_ota()
             continue
         else:
