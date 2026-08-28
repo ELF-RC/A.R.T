@@ -1723,48 +1723,16 @@ def quiet():
     V.JM = input('> 是否开启静默 [0/1]: ') == '1'
 
 
-def tool_info():
-    os.system("clear")
-    print(f"""
-\x1b[1;36m{'=' * 50}
-  A.R.T - Android ROM Tool
-{'=' * 50}\x1b[0m
-
-\x1b[1;33m项目链接:\x1b[0m
-  GitHub: https://github.com/ELF-RC/A.R.T
-
-\x1b[1;33m原工具开发者:\x1b[0m
-  ColdWindScholar (3590361911@qq.com)
-
-\x1b[1;33m工具开发者:\x1b[0m
-  ELF-RC (3580977309@qq.com)
-
-\x1b[1;33m二进制文件开发者:\x1b[0m
-  AOSP (Apache-2.0)        - make_ext4fs, img2simg, lpmake
-  erofs-utils (GPL-2.0)    - extract.erofs, mkfs.erofs
-  e2fsprogs (GPL-2.0)      - mke2fs, e2fsdroid, e2fsck, resize2fs
-  Magisk (GPL-3.0)         - magiskboot
-  BusyBox (GPL-2.0)        - busybox, cpio
-  Google (Apache-2.0)      - brotli
-  Meta (BSD-3-Clause)      - zstd
-  dtc (GPL-2.0)            - dtc
-  avbroot (GPL-3.0)        - avbroot (chenxiaolong)
-  avbroot-pro-max (GPL-3.0) - avbroot Pro Max (ChuiShui233)
-
-\x1b[1;33m协议:\x1b[0m
-  本工具使用 AGPL-3.0 协议
-
-\x1b[1;33m感谢所有开源贡献者！\x1b[0m
-{'=' * 50}
-""")
-    input('> 任意键返回')
+def _tool_info_handler():
+    from pys import tool_info as _ti
+    _ti.show()
 
 
 menu_actions = {
     55: lambda: input(
         "Github: https://github.com/ColdWindScholar/D.N.A3/\nWrote By ColdWindScholar (3590361911@qq.com)"),
     66: sys.exit,
-    88: tool_info,
+    88: _tool_info_handler,
     8: menu_modules,
     7: menu_super
 }
