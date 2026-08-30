@@ -3,6 +3,7 @@
 import os
 import subprocess
 import tempfile
+from pathlib import Path
 
 from pys.cyrus import V, BIN_PATH
 
@@ -462,6 +463,100 @@ def _patch_ota_with_avb():
     input('> 按回车继续')
 
 
+def _list_verify_zips():
+    """Return [(name, path), ...] for OTA_WORK/*_signed.zip."""
+    items = []
+    ota_work = V.layout.ota_work_dir if V.layout else None
+    if ota_work and ota_work.is_dir():
+        for f in sorted(ota_work.iterdir()):
+            if f.is_file() and f.name.lower().endswith('_signed.zip'):
+                items.append((f.name, f))
+    return items
+
+
+def _ask_zip_path():
+    """Ask for a zip path. Empty cancels."""
+    while True:
+        raw = input('\n  zip 路径（绝对路径，留空取消）>> ').strip()
+        if not raw:
+            return None
+        p = Path(raw)
+        if p.is_file() and p.suffix.lower() == '.zip':
+            return p
+        if not p.is_file():
+            print(f'  {RED}> 文件不存在: {raw}{CLOSE}')
+        else:
+            print(f'  {RED}> 不是 zip 文件: {raw}{CLOSE}')
+
+
+def _pick_verify_zip():
+    """Pick OTA_WORK/*_signed.zip, or ask for a zip path if none exist."""
+    zips = _list_verify_zips()
+    if not zips:
+        print(f'> {YELLOW}未找到 OTA_WORK/*_signed.zip，请手动输入路径{CLOSE}')
+        return _ask_zip_path()
+    if len(zips) == 1:
+        return zips[0][1]
+
+    print()
+    print(f'  {"序号":>4}      文件名')
+    print(f'  {"----":>6}    {"-" * 40}')
+    for i, (name, _) in enumerate(zips, 1):
+        print(f'  {i:>4}      {name}')
+
+    print(f'\n  请输入要验证的OTA包序号：')
+    ans = input('> ').strip()
+    if not ans.isdigit():
+        print(f'> {RED}无效输入{CLOSE}')
+        return None
+    idx = int(ans)
+    if idx < 1 or idx > len(zips):
+        print(f'> {RED}无效序号: {idx}{CLOSE}')
+        return None
+    return zips[idx - 1][1]
+
+
+def _verify_ota():
+    """[05] Verify OTA zip signatures with avbroot ota verify."""
+    zip_path = _pick_verify_zip()
+    if not zip_path:
+        input('> 按回车继续')
+        return
+    if not zip_path.is_file():
+        print(f'> {RED}OTA 包不存在：{zip_path.name}{CLOSE}')
+        input('> 按回车继续')
+        return
+
+    cmd = ['ota', 'verify', '--input', str(zip_path)]
+    kd = _signkey_dir()
+    cert = kd / 'ota.crt' if kd else None
+    pkmd = kd / 'avb_pkmd.bin' if kd else None
+    has_cert = bool(cert and cert.is_file())
+    has_pkmd = bool(pkmd and pkmd.is_file())
+    if has_cert:
+        cmd.extend(['--cert-ota', str(cert)])
+    if has_pkmd:
+        cmd.extend(['--public-key-avb', str(pkmd)])
+
+    print(f'\n  验证: {zip_path}')
+    if has_cert and has_pkmd:
+        print('  模式: 核对 ota.crt + avb_pkmd.bin')
+    elif has_cert:
+        print(f'  模式: 核对 ota.crt{YELLOW}（无 avb_pkmd.bin，AVB 不验信任）{CLOSE}')
+    elif has_pkmd:
+        print(f'  模式: 核对 avb_pkmd.bin{YELLOW}（无 ota.crt，整包不验信任）{CLOSE}')
+    else:
+        print(f'  {YELLOW}模式: 仅检查签名是否有效（未找到密钥）{CLOSE}')
+
+    print(f'\n> 开始验证...')
+    ok = _run_avbroot(cmd)
+    if ok:
+        print(f'\n{GREEN}> 验证通过{CLOSE}')
+    else:
+        print(f'\n{RED}> 验证失败{CLOSE}')
+    input('> 按回车继续')
+
+
 def _show_status():
     """Print current status."""
     ks = _key_status()
@@ -528,8 +623,8 @@ def main():
             _patch_ota_with_avb()
             continue
         elif choice in ('05', '5'):
-            print(f'\n{YELLOW}> 验证功能待实现{CLOSE}')
-            input('> 任意键继续')
+            _verify_ota()
+            continue
         elif choice in ('06', '6'):
             _patch_ota_disable_avb()
             continue
