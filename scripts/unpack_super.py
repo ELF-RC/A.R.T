@@ -4,10 +4,10 @@ import os
 import shutil
 from pathlib import Path
 
-from pys.utils import V, display
-from pys import lpunpack
-from pys.workspace import LayoutError
-from pys.workspace import (
+from scripts.utils import V, display
+from scripts import lpunpack
+from scripts.workspace import LayoutError
+from scripts.workspace import (
     workspace_partition, _super_images_to_process,
 )
 
@@ -65,7 +65,7 @@ def extract_super(working_source, partition):
 
     Returns True if handled (either extracted or moved to OUT), False on failure.
     """
-    from pys.unpack_dispatch import decompress_img
+    from scripts.unpack_dispatch import decompress_img
 
     display(f'正在分解: {os.path.basename(working_source)} <super>', 3)
     super_dir = os.path.join(V.workspace, 'super') + os.sep

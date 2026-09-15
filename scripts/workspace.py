@@ -13,7 +13,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from pys.utils import PWD_DIR, V, get_dir_size, ceil
+from scripts.utils import PWD_DIR, V, get_dir_size, ceil
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -304,7 +304,7 @@ def workspace_relative_path(relative_path):
 
 def _get_image_logical_size(source):
     """Return logical size of an image (sparse-aware)."""
-    from pys.imgextractor import ULTRAMAN
+    from scripts.imgextractor import ULTRAMAN
     return ULTRAMAN().LEMON(source)
 
 

@@ -4,14 +4,14 @@ import os
 import time
 from pathlib import Path
 
-from pys.utils import (
+from scripts.utils import (
     V, PWD_DIR, RED, GREEN, YELLOW, CLOSE, display, call, get_dir_size, ceil,
     CoastTime,
 )
-from pys import fspatch
-from pys import img2sdat
-from pys.workspace import LayoutError
-from pys.workspace import load_image_json
+from scripts import fspatch
+from scripts import img2sdat
+from scripts.workspace import LayoutError
+from scripts.workspace import load_image_json
 
 
 def walk_contexts(contexts):

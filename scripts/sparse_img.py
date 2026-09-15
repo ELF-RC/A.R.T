@@ -18,7 +18,7 @@ import sys
 import struct
 from hashlib import sha1
 
-from pys import rangelib
+from scripts import rangelib
 
 
 class SparseImage:

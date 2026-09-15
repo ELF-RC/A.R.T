@@ -6,10 +6,10 @@ from pathlib import Path
 from rich import print as echo
 from rich.console import Console
 
-from pys.utils import V, display
-from pys import imgextractor
-from pys.workspace import LayoutError
-from pys.workspace import (
+from scripts.utils import V, display
+from scripts import imgextractor
+from scripts.workspace import LayoutError
+from scripts.workspace import (
     workspace_partition, create_partition_stage, metadata_path,
     ensure_contexts_file, _commit_extracted_partition,
 )

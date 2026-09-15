@@ -3,9 +3,9 @@
 import os
 from pathlib import Path
 
-from pys.utils import V, display, call
-from pys.workspace import LayoutError
-from pys.workspace import (
+from scripts.utils import V, display, call
+from scripts.workspace import LayoutError
+from scripts.workspace import (
     workspace_partition, metadata_path,
     normalize_erofs_metadata, _commit_extracted_partition,
 )

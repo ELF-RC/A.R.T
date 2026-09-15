@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 PWD_DIR = os.getcwd() + os.sep
-BIN_PATH = PWD_DIR + "local/bin/Linux/x86_64/"
+BIN_PATH = PWD_DIR + "art-res/bin-amd64/"
 
 RED, WHITE, CYAN, YELLOW, MAGENTA, GREEN, BOLD, CLOSE = [
     '\x1b[91m', '\x1b[97m', '\x1b[36m', '\x1b[93m',

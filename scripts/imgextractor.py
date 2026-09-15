@@ -6,7 +6,7 @@ import re
 import struct
 from pathlib import Path
 
-from pys import ext4
+from scripts import ext4
 
 SPARSE_HEADER_MAGIC = 0xED26FF3A
 EXT4_RAW_HEADER_MAGIC = 0xED26FF3A
@@ -201,7 +201,7 @@ class ULTRAMAN(object):
         return True
 
     def LEMON(self, target):
-        from pys.utils import gettype, findfile
+        from scripts.utils import gettype, findfile
         if not os.path.exists(target):
             return 0
         target_type = gettype(target)

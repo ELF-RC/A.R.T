@@ -1,6 +1,6 @@
 import multiprocessing
 import sys
-from pys import cyrus
+from scripts import cyrus
 
 
 def exception_handler(exception_type, exception, traceback):
@@ -14,8 +14,8 @@ def exception_handler(exception_type, exception, traceback):
 
 
 def init():
-    from pys.config import check_permissions
-    from pys.menu import menu_once
+    from scripts.config import check_permissions
+    from scripts.menu import menu_once
     check_permissions()
     menu_once()
 

@@ -4,8 +4,8 @@ import os
 import shutil
 from pathlib import Path
 
-from pys.utils import V, BIN_PATH, display, call, rmdire
-from pys.utils import gettype, findfile
+from scripts.utils import V, BIN_PATH, display, call, rmdire
+from scripts.utils import gettype, findfile
 
 
 def unpackboot(file, distance):

@@ -5,11 +5,11 @@ import os
 import re
 import sys
 
-from pys.utils import (
+from scripts.utils import (
     PWD_DIR, BIN_PATH, V, GREEN, CYAN, YELLOW, BOLD, CLOSE, display, call,
 )
 
-SETUP_JSON = PWD_DIR + "local/set/setup.json"
+SETUP_JSON = PWD_DIR + "art-res/settings.json"
 
 _SETUP_DEFAULTS = {
     'REPACK_EROFS_IMG': "1",

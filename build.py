@@ -32,16 +32,10 @@ def remove_generated_path(path: Path) -> None:
 
 
 def copy_release_resources(release_dir: Path) -> None:
-    binary_source = ROOT / 'local' / 'bin' / 'Linux' / 'x86_64'
-    binary_target = release_dir / 'local' / 'bin' / 'Linux' / 'x86_64'
-    if binary_source.is_dir():
-        shutil.copytree(binary_source, binary_target, dirs_exist_ok=True)
-
-    for subdir in ('etc', 'set'):
-        source = ROOT / 'local' / subdir
-        target = release_dir / 'local' / subdir
-        if source.is_dir():
-            shutil.copytree(source, target, dirs_exist_ok=True)
+    resource_source = ROOT / 'art-res'
+    resource_target = release_dir / 'art-res'
+    if resource_source.is_dir():
+        shutil.copytree(resource_source, resource_target, dirs_exist_ok=True)
 
     for filename in ('setting.ini', 'LICENSE', 'README.md'):
         source = ROOT / filename
@@ -91,9 +85,9 @@ def main() -> None:
     log_file = ROOT / 'build-call.log'
     result = subprocess.run(
         [sys.executable, '-m', 'PyInstaller',
-         str(ROOT / 'run.py'),
+         str(ROOT / 'art.py'),
          '--onefile',
-         '--name', 'run',
+         '--name', 'art',
          '--distpath', str(DIST_DIR),
          '--workpath', str(BUILD_DIR),
          '--specpath', str(BUILD_DIR),
@@ -104,7 +98,7 @@ def main() -> None:
     )
     log_file.write_text(result.stdout or '', encoding='utf-8')
 
-    built_executable = DIST_DIR / 'run'
+    built_executable = DIST_DIR / 'art'
     if not built_executable.is_file():
         print(f'\n  [ERROR] PyInstaller failed. See {log_file.name} for details.', file=sys.stderr)
         if result.stdout:
@@ -117,8 +111,8 @@ def main() -> None:
     _log('3/4', 'Assembling release directory...')
     release_dir = RELEASE_DIR
     release_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(built_executable, release_dir / 'run')
-    os.chmod(release_dir / 'run', 0o755)
+    shutil.copy2(built_executable, release_dir / 'art')
+    os.chmod(release_dir / 'art', 0o755)
     copy_release_resources(release_dir)
 
     # Step 4: Archive

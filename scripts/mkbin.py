@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from pys.cyrus import V, BIN_PATH
+from scripts.cyrus import V, BIN_PATH
 
 YELLOW = '\x1b[1;33m'
 GREEN = '\x1b[1;32m'
