@@ -1,0 +1,124 @@
+name: Build A.R.T (Nuitka)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+            arch_suffix: amd64
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+            arch_suffix: arm64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf ccache unzip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install nuitka ordered-set zstandard
+          pip install requests rich protobuf
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build with Nuitka
+        run: |
+           python -m nuitka \
+            --standalone \
+            --onefile \
+            --output-filename=art \
+            --output-dir=.art-dist \
+            --assume-yes-for-downloads \
+            --verbose \
+            --verbose-output=nuitka-build.log \
+            --onefile-no-compression \
+            --static-libpython=yes \
+            art.py 2>&1 | tee nuitka-stdout.log
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p logs
+
+          # Workflow environment info
+          {
+            echo "=== Workflow Environment ==="
+            echo "Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "Runner: ${{ matrix.runner }}"
+            echo "Architecture: ${{ matrix.arch_suffix }}"
+            echo "Version: ${{ steps.version.outputs.version }}"
+            echo ""
+            echo "=== System Info ==="
+            uname -a
+            echo ""
+            echo "=== Python Version ==="
+            python --version
+            echo ""
+            echo "=== Nuitka Version ==="
+            python -m nuitka --version 2>&1 || true
+            echo ""
+            echo "=== Disk Usage ==="
+            df -h /
+            echo ""
+            echo "=== Memory ==="
+            free -h
+          } > logs/workflow-env.log
+
+          # Copy Nuitka logs
+          [ -f nuitka-build.log ] && cp nuitka-build.log logs/ || echo "nuitka-build.log not found" > logs/nuitka-build.log
+          [ -f nuitka-stdout.log ] && cp nuitka-stdout.log logs/ || echo "nuitka-stdout.log not found" > logs/nuitka-stdout.log
+
+          # Collect Nuitka internal logs if any
+          if ls .art-dist/*.log 2>/dev/null; then
+            cp .art-dist/*.log logs/
+          fi
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.arch_suffix }}
+          path: logs/
+          retention-days: 30
+
+      - name: Upload binary
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: art-${{ matrix.arch_suffix }}-v${{ steps.version.outputs.version }}
+          path: .art-dist/art
+          compression-level: 0
+          retention-days: 30
