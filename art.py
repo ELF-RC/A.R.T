@@ -1,8 +1,18 @@
+# -*- coding: utf-8 -*-
 import multiprocessing
 import sys
+
+
+def _configure_stdio_encoding():
+    """Force UTF-8 text streams for runtimes that default to ASCII."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+_configure_stdio_encoding()
+
 from scripts import cyrus
-
-
 def exception_handler(exception_type, exception, traceback):
     del traceback
     print("很抱歉，工具出现错误， 请把以下日志提交给开发者：")
