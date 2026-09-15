@@ -119,16 +119,21 @@ jobs:
         with:
           name: art-${{ matrix.arch_suffix }}-v${{ steps.version.outputs.version }}
           path: .art-dist/art
-          compression-level: 0
           retention-days: 30
+
+      - name: Prepare final artifact
+        if: success()
+        run: |
+          rm -rf final-artifact
+          mkdir -p final-artifact
+          cp .art-dist/art final-artifact/art
+          cp -R art-res final-artifact/art-res
 
       - name: Upload final artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          # upload-artifact creates the downloadable .zip automatically.
+          # Uploading one staging directory keeps art and art-res at the ZIP root.
           name: A.R.T-${{ steps.version.outputs.version }}-${{ matrix.arch_suffix }}
-          path: |
-            .art-dist/art
-            art-res
+          path: final-artifact/*
           retention-days: 30
