@@ -129,6 +129,21 @@ jobs:
           cp .art-dist/art final-artifact/art
           cp -R art-res final-artifact/art-res
 
+          case "${{ matrix.arch }}" in
+            amd64)
+              rm -rf final-artifact/art-res/bin-arm64
+              mv final-artifact/art-res/bin-amd64 final-artifact/art-res/bin
+              ;;
+            arm64)
+              rm -rf final-artifact/art-res/bin-amd64
+              mv final-artifact/art-res/bin-arm64 final-artifact/art-res/bin
+              ;;
+            *)
+              echo "Unsupported architecture: ${{ matrix.arch }}" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Upload final artifact
         if: success()
         uses: actions/upload-artifact@v4
