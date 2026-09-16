@@ -56,7 +56,7 @@ def _combine_fragments(source):
 
 def decompress_dat(transfer, source, distance=None, keep=0):
     """Convert DAT directly: read transfer.list + dat from INPUT, extract to partition."""
-    from scripts.unpack_dispatch import decompress_img
+    from scripts.extract_dispatch import decompress_img
 
     del distance, keep
     if not transfer or not os.path.isfile(transfer):

@@ -7,20 +7,20 @@ Core:
 - scripts.config         : configuration/setup management
 - scripts.workspace      : project/partition path management
 
-Extractors (unpack_<format>):
-- scripts.unpack_payload : payload.bin extraction
-- scripts.unpack_dat     : new.dat / new.dat.br extraction
-- scripts.unpack_ext4    : EXT4 / sparse image extraction
-- scripts.unpack_erofs   : EROFS image extraction
-- scripts.unpack_super   : super.img extraction
-- scripts.unpack_boot    : boot / vendor_boot image extraction
-- scripts.unpack_win     : .win archive extraction
-- scripts.unpack_dispatch: dispatcher (decompress_img, decompress, extract_zrom)
+Extractors (extract_<format>):
+- scripts.extract_payload : payload.bin extraction
+- scripts.extract_dat     : new.dat / new.dat.br extraction
+- scripts.extract_ext4    : EXT4 / sparse image extraction
+- scripts.extract_erofs   : EROFS image extraction
+- scripts.extract_super   : super.img extraction
+- scripts.extract_boot    : boot / vendor_boot image extraction
+- scripts.extract_win     : .win archive extraction
+- scripts.extract_dispatch: dispatcher (decompress_img, decompress, extract_zrom)
 
-Repackers (repack_<target>):
-- scripts.repack_img     : EXT4/EROFS partition image recompression
-- scripts.repack_super   : super.img synthesis
-- scripts.repack_boot    : boot / vendor_boot repack
+Repackers (make_<target>):
+- scripts.make_img     : EXT4/EROFS partition image recompression
+- scripts.make_super   : super.img synthesis
+- scripts.make_boot    : boot / vendor_boot repack
 
 UI:
 - scripts.menu           : menu/UI functions
@@ -67,41 +67,41 @@ import sys as _sys
 _sys.modules['scripts.gettype'] = _gettype_compat
 
 # ── unpack: boot ───────────────────────────────────────────────────────
-from scripts.unpack_boot import unpackboot, boot_unpack  # noqa: F401
+from scripts.extract_boot import unpackboot, boot_unpack  # noqa: F401
 
 # ── unpack: payload ────────────────────────────────────────────────────
-from scripts.unpack_payload import decompress_bin, _decompress_payload_images  # noqa: F401
+from scripts.extract_payload import decompress_bin, _decompress_payload_images  # noqa: F401
 
 # ── unpack: dat / dat.br ──────────────────────────────────────────────
-from scripts.unpack_dat import (  # noqa: F401
+from scripts.extract_dat import (  # noqa: F401
     decompress_dat, decompress_bro, decompress_dat_batch,
     _numbered_fragments, _combine_fragments,
     _list_dat_partitions, _decompress_single_partition,
 )
 
 # ── unpack: ext4 / sparse ─────────────────────────────────────────────
-from scripts.unpack_ext4 import extract_ext4, convert_sparse  # noqa: F401
+from scripts.extract_ext4 import extract_ext4, convert_sparse  # noqa: F401
 
 # ── unpack: erofs ──────────────────────────────────────────────────────
-from scripts.unpack_erofs import extract_erofs  # noqa: F401
+from scripts.extract_erofs import extract_erofs  # noqa: F401
 
 # ── unpack: super ──────────────────────────────────────────────────────
-from scripts.unpack_super import extract_super  # noqa: F401
+from scripts.extract_super import extract_super  # noqa: F401
 
 # ── unpack: win ────────────────────────────────────────────────────────
-from scripts.unpack_win import decompress_win, _win_partition  # noqa: F401
+from scripts.extract_win import decompress_win, _win_partition  # noqa: F401
 
 # ── unpack: dispatcher ─────────────────────────────────────────────────
-from scripts.unpack_dispatch import decompress_img, decompress, extract_zrom  # noqa: F401
+from scripts.extract_dispatch import decompress_img, decompress, extract_zrom  # noqa: F401
 
 # ── repack: img ────────────────────────────────────────────────────────
-from scripts.repack_img import recompress, walk_contexts  # noqa: F401
+from scripts.make_img import recompress, walk_contexts  # noqa: F401
 
 # ── repack: super ──────────────────────────────────────────────────────
-from scripts.repack_super import repack_super  # noqa: F401
+from scripts.make_super import repack_super  # noqa: F401
 
 # ── repack: boot ───────────────────────────────────────────────────────
-from scripts.repack_boot import dboot, boot_repack  # noqa: F401
+from scripts.make_boot import dboot, boot_repack  # noqa: F401
 
 # ── menu ───────────────────────────────────────────────────────────────
 from scripts.menu import (  # noqa: F401

@@ -13,7 +13,7 @@ from scripts.workspace import partition_name, workspace_partition, _stage_work_s
 
 def _decompress_payload_images(payload, payload_dir, mode):
     """Extract payload partitions based on user selection."""
-    from scripts.unpack_dispatch import decompress_img
+    from scripts.extract_dispatch import decompress_img
 
     payload_partitions = extract_payload.info(payload)
     if mode == '1':
