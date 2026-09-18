@@ -117,7 +117,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: art-${{ matrix.arch_suffix }}-v${{ steps.version.outputs.version }}
+          name: binary-${{ steps.version.outputs.version }}-${{ matrix.arch_suffix }}
           path: .art-dist/art
           retention-days: 30
 
