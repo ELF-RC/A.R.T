@@ -5,20 +5,20 @@ import sys
 from glob import glob
 from pathlib import Path
 
-from scripts.utils import (
+from scripts.primary.utils import (
     V, PWD_DIR, RED, GREEN, YELLOW, CYAN, MAGENTA, BOLD, CLOSE,
     display, rmdire, CoastTime, change_permissions_recursive,
 )
-from scripts.config import load_setup_json, env_setup, check_permissions
-from scripts.workspace import envelop_project, workspace_partition
-from scripts.workspace import LayoutError, UnsupportedLayoutError
-from scripts.extract_dispatch import decompress, extract_zrom, decompress_img
-from scripts.extract_payload import decompress_bin
-from scripts.extract_win import decompress_win
-from scripts.make_img import recompress
-from scripts.make_super import repack_super
-from scripts.extract_boot import boot_unpack
-from scripts.make_boot import boot_repack
+from scripts.primary.config import load_setup_json, env_setup, check_permissions
+from scripts.primary.workspace import envelop_project, workspace_partition
+from scripts.primary.workspace import LayoutError, UnsupportedLayoutError
+from scripts.extract.extract_dispatch import decompress, extract_zrom, decompress_img
+from scripts.extract.extract_payload import decompress_bin
+from scripts.extract.extract_win import decompress_win
+from scripts.remake.make_img import recompress
+from scripts.remake.make_super import repack_super
+from scripts.extract.extract_boot import boot_unpack
+from scripts.remake.make_boot import boot_repack
 
 MOD_DIR = PWD_DIR + "local/sub/"
 
@@ -73,7 +73,7 @@ def creat_project():
 
     V.project = "DNA_" + creat_name
     try:
-        from scripts.workspace import ProjectLayout
+        from scripts.primary.workspace import ProjectLayout
         ProjectLayout.validate_component(V.project, "工程")
     except LayoutError as error:
         input(f"> 工程名称无效: {error}")
@@ -123,7 +123,7 @@ def menu_once():
             env_setup()
             load_setup_json()
         elif int(choice) == 88:
-            from scripts import tool_info as _ti
+            from scripts.primary import tool_info as _ti
             _ti.show()
         elif int(choice) == 0:
             if creat_project():
@@ -233,7 +233,7 @@ def menu_modules():
             os.system("clear")
             print(f"\x1b[1;31m> 执行插件:\x1b[0m {os.path.basename(V.dict0[int(choice)])}\n")
             if os.path.isfile(shell_sub := (V.dict0[int(choice)] + os.sep + "run.sh")):
-                from scripts.utils import call
+                from scripts.primary.utils import call
                 call(['busybox', 'bash', shell_sub, V.workspace.replace(os.sep, '/')])
             input('> 任意键继续')
         else:
@@ -241,7 +241,7 @@ def menu_modules():
 
 
 def _tool_info_handler():
-    from scripts import tool_info as _ti
+    from scripts.primary import tool_info as _ti
     _ti.show()
 
 
@@ -301,12 +301,12 @@ def menu_main():
             quiet()
             decompress_win(list(set(sorted(infile))))
         elif int(option) == 6:
-            from scripts import lpunpack2
+            from scripts.primary import lpunpack2
             lpunpack2.main()
             input('> 任意键继续')
             continue
         elif int(option) == 12:
-            from scripts import more
+            from scripts.primary import more
             more.main()
             continue
         elif int(option) in [9, 10, 11]:

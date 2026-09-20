@@ -4,7 +4,7 @@ import os
 import shutil
 import subprocess
 
-from scripts.cyrus import V, BIN_PATH
+from scripts.primary.cyrus import V, BIN_PATH
 
 YELLOW = '\x1b[1;33m'
 GREEN = '\x1b[1;32m'

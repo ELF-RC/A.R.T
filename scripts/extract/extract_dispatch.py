@@ -1,23 +1,23 @@
 """Image extraction dispatcher — routes to format-specific extractors.
 
 Format-specific logic lives in:
-- scripts.extract_payload : payload.bin
-- scripts.extract_dat     : new.dat / new.dat.br
-- scripts.extract_ext4    : EXT4 / sparse images
-- scripts.extract_erofs   : EROFS images
-- scripts.extract_super   : super.img
-- scripts.extract_boot    : boot / vendor_boot images
-- scripts.extract_win     : .win archives
+- scripts.extract.extract_payload : payload.bin
+- scripts.extract.extract_dat     : new.dat / new.dat.br
+- scripts.extract.extract_ext4    : EXT4 / sparse images
+- scripts.extract.extract_erofs   : EROFS images
+- scripts.extract.extract_super   : super.img
+- scripts.extract.extract_boot    : boot / vendor_boot images
+- scripts.extract.extract_win     : .win archives
 """
 
 import os
 import time
 from glob import glob
 
-from scripts.utils import V, RED, GREEN, YELLOW, CLOSE, display
-from scripts.utils import gettype, findfile
-from scripts.workspace import LayoutError
-from scripts.workspace import (
+from scripts.primary.utils import V, RED, GREEN, YELLOW, CLOSE, display
+from scripts.primary.utils import gettype, findfile
+from scripts.primary.workspace import LayoutError
+from scripts.primary.workspace import (
     partition_name, workspace_partition, workspace_temp,
     _destination_partition, _stage_work_source, envelop_project,
 )
@@ -50,8 +50,8 @@ def decompress_img(source, distance=None, keep=1):
     committed = False
 
     if file_type in ('boot', 'vendor_boot'):
-        from scripts.extract_boot import boot_unpack
-        from scripts.workspace import create_partition_stage, metadata_path, _commit_extracted_partition
+        from scripts.extract.extract_boot import boot_unpack
+        from scripts.primary.workspace import create_partition_stage, metadata_path, _commit_extracted_partition
         try:
             _, staged_partition, staged_config = create_partition_stage(partition, 'boot-extract')
             if not boot_unpack(working_source, str(staged_partition)):
@@ -65,22 +65,22 @@ def decompress_img(source, distance=None, keep=1):
             print(f'> {partition} boot 分解失败: {error}')
 
     elif file_type == 'sparse':
-        from scripts.extract_ext4 import convert_sparse
+        from scripts.extract.extract_ext4 import convert_sparse
         raw_source = convert_sparse(working_source)
         if raw_source:
             decompress_img(raw_source, destination)
         return
 
     elif file_type == 'ext':
-        from scripts.extract_ext4 import extract_ext4
+        from scripts.extract.extract_ext4 import extract_ext4
         committed = extract_ext4(working_source, partition, destination)
 
     elif file_type == 'erofs':
-        from scripts.extract_erofs import extract_erofs
+        from scripts.extract.extract_erofs import extract_erofs
         committed = extract_erofs(working_source, partition, destination)
 
     elif file_type == 'super':
-        from scripts.extract_super import extract_super
+        from scripts.extract.extract_super import extract_super
         extract_super(working_source, partition)
         return
 
@@ -94,7 +94,7 @@ def decompress_img(source, distance=None, keep=1):
 def decompress(infile, flag=4):
     """Batch decompress dispatcher for dat.br / dat / img files."""
     if flag in (2, 3):
-        from scripts.extract_dat import decompress_dat_batch
+        from scripts.extract.extract_dat import decompress_dat_batch
         decompress_dat_batch(infile, flag)
         return
 
@@ -120,7 +120,7 @@ def extract_zrom(rom):
     """Extract a ROM zip or install a plugin."""
     import zipfile
     import shutil
-    from scripts.utils import rmdire, safe_extract_zip, change_permissions_recursive
+    from scripts.primary.utils import rmdire, safe_extract_zip, change_permissions_recursive
 
     MOD_DIR = os.getcwd() + os.sep + "local/sub/"
 
@@ -173,7 +173,7 @@ def extract_zrom(rom):
 
     payload_files = sorted(glob(os.path.join(import_dir, '**', 'payload.bin'), recursive=True))
     if payload_files:
-        from scripts.extract_payload import decompress_bin
+        from scripts.extract.extract_payload import decompress_bin
         decompress_bin(
             payload_files[0],
             flag=input(f'> {RED}选择提取方式:  [0]全盘提取  [1]指定镜像{CLOSE} >> '),

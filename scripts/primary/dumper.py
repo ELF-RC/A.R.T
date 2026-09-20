@@ -12,8 +12,8 @@ from multiprocessing import cpu_count
 import zstandard
 from rich.progress import Progress, BarColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
 
-from scripts import update_metadata_pb2 as um
-from scripts.workspace import ProjectLayout
+from scripts.primary import update_metadata_pb2 as um
+from scripts.primary.workspace import ProjectLayout
 
 flatten = lambda l: [item for sublist in l for item in sublist]
 

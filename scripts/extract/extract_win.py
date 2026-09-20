@@ -5,10 +5,10 @@ import shutil
 import tarfile
 from pathlib import Path
 
-from scripts.utils import V, display, safe_extract_tar
-from scripts.utils import gettype, findfile
-from scripts.workspace import LayoutError, ProjectLayout
-from scripts.workspace import (
+from scripts.primary.utils import V, display, safe_extract_tar
+from scripts.primary.utils import gettype, findfile
+from scripts.primary.workspace import LayoutError, ProjectLayout
+from scripts.primary.workspace import (
     workspace_partition, create_partition_stage,
     _commit_extracted_partition,
 )
@@ -21,7 +21,7 @@ def _win_partition(source):
 
 def decompress_win(infile_list):
     """Extract .win archives (image or tar format) into WORKSPACE."""
-    from scripts.extract_dispatch import decompress_img
+    from scripts.extract.extract_dispatch import decompress_img
 
     groups = {}
     for source in infile_list:

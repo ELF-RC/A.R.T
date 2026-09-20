@@ -3,10 +3,10 @@
 import os
 from pathlib import Path
 
-from scripts.utils import V, RED, GREEN, YELLOW, CLOSE, display, call, CoastTime
-from scripts.utils import gettype, findfile
-from scripts import imgextractor
-from scripts.workspace import LayoutError
+from scripts.primary.utils import V, RED, GREEN, YELLOW, CLOSE, display, call, CoastTime
+from scripts.primary.utils import gettype, findfile
+from scripts.primary import imgextractor
+from scripts.primary.workspace import LayoutError
 
 
 def repack_super(selected_parts, super_type, super_sparse):
@@ -17,7 +17,7 @@ def repack_super(selected_parts, super_type, super_sparse):
         super_type: 0=A-only, 1=A/B, 2=Virtual A/B
         super_sparse: 1=sparse output, 0=raw output
     """
-    from scripts.workspace import partition_name
+    from scripts.primary.workspace import partition_name
 
     group_name = V.SETUP_MANIFEST['GROUP_NAME']
     super_size = V.SETUP_MANIFEST['SUPER_SIZE']

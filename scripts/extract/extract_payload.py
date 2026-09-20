@@ -4,16 +4,16 @@ import os
 import shutil
 from glob import glob
 
-from scripts.utils import V, RED, GREEN, YELLOW, MAGENTA, CLOSE, _human_size, display
-from scripts import dumper as extract_payload
-from scripts.utils import gettype, findfile
-from scripts.workspace import LayoutError
-from scripts.workspace import partition_name, workspace_partition, _stage_work_source
+from scripts.primary.utils import V, RED, GREEN, YELLOW, MAGENTA, CLOSE, _human_size, display
+from scripts.primary import dumper as extract_payload
+from scripts.primary.utils import gettype, findfile
+from scripts.primary.workspace import LayoutError
+from scripts.primary.workspace import partition_name, workspace_partition, _stage_work_source
 
 
 def _decompress_payload_images(payload, payload_dir, mode):
     """Extract payload partitions based on user selection."""
-    from scripts.extract_dispatch import decompress_img
+    from scripts.extract.extract_dispatch import decompress_img
 
     payload_partitions = extract_payload.info(payload)
     if mode == '1':

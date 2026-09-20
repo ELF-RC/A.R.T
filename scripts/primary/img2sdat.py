@@ -10,8 +10,8 @@ from __future__ import print_function
 
 import os
 import tempfile
-from scripts import blockimgdiff
-from scripts import sparse_img
+from scripts.primary import blockimgdiff
+from scripts.primary import sparse_img
 
 
 def main(INPUT_IMAGE, OUTDIR='.', VERSION=None, PREFIX='system'):

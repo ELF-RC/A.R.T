@@ -5,11 +5,11 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from scripts.utils import V, RED, GREEN, YELLOW, CLOSE, display, call
-from scripts import sdat2img
-from scripts.utils import gettype, findfile
-from scripts.workspace import LayoutError
-from scripts.workspace import partition_name, workspace_partition
+from scripts.primary.utils import V, RED, GREEN, YELLOW, CLOSE, display, call
+from scripts.primary import sdat2img
+from scripts.primary.utils import gettype, findfile
+from scripts.primary.workspace import LayoutError
+from scripts.primary.workspace import partition_name, workspace_partition
 
 
 def _numbered_fragments(source):
@@ -56,7 +56,7 @@ def _combine_fragments(source):
 
 def decompress_dat(transfer, source, distance=None, keep=0):
     """Convert DAT directly: read transfer.list + dat from INPUT, extract to partition."""
-    from scripts.extract_dispatch import decompress_img
+    from scripts.extract.extract_dispatch import decompress_img
 
     del distance, keep
     if not transfer or not os.path.isfile(transfer):

@@ -28,11 +28,11 @@ def main():
         if choice in ('00', '0'):
             return
         elif choice in ('01', '1'):
-            from scripts import mkbin
+            from scripts.primary import mkbin
             mkbin.main()
             input('> 任意键继续')
         elif choice in ('02', '2'):
-            from scripts import avbtool
+            from scripts.primary import avbtool
             avbtool.main()
             input('> 任意键继续')
         else:

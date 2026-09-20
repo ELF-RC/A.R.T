@@ -13,11 +13,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     import lpunpack as _lp
 except ImportError:
-    print('> 无法导入 lpunpack 模块，请确认 scripts/ 目录下有 lpunpack.py')
+    print('> 无法导入 lpunpack 模块，请确认 scripts/primary/ 目录下有 lpunpack.py')
     sys.exit(1)
 
 try:
-    from scripts.cyrus import V
+    from scripts.primary.cyrus import V
 except Exception:
     V = None  # 独立运行时降级，不依赖 V
 
