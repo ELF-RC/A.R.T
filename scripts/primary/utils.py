@@ -1,4 +1,4 @@
-"""General utility functions extracted from cyrus.py."""
+"""Shared utility functions and runtime tool management."""
 
 import os
 import re
@@ -264,3 +264,5 @@ def findfile(file, dir_) -> str:
         if file in files:
             return root + os.sep + file
 
+# Initialize the shared runtime tool path for all consumers.
+init_bin_path()

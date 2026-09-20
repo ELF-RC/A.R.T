@@ -1,4 +1,4 @@
-"""Configuration and setup management extracted from cyrus.py."""
+"""Configuration and setup management."""
 
 import json
 import os

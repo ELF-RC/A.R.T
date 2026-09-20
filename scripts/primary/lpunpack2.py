@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# 复用原 lpunpack 模块做元数据解析；使用 cyrus.V 获取 INPUT/OUT 路径
+# 复用原 lpunpack 模块做元数据解析；使用 utils.V 获取 INPUT/OUT 路径
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
@@ -17,7 +17,7 @@ except ImportError:
     sys.exit(1)
 
 try:
-    from scripts.primary.cyrus import V
+    from scripts.primary.utils import V
 except Exception:
     V = None  # 独立运行时降级，不依赖 V
 
@@ -29,7 +29,7 @@ CLOSE = '\x1b[0m'
 
 
 # ---------------------------------------------------------------------------
-# 路径获取：优先使用 V（来自 cyrus 已初始化工程），否则回退到 cwd 扫描
+# 路径获取：优先使用 V（来自统一工具/工程状态），否则回退到 cwd 扫描
 # ---------------------------------------------------------------------------
 def _get_input_dir():
     if V and getattr(V, 'input', None):

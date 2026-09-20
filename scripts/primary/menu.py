@@ -1,4 +1,4 @@
-"""Menu/UI functions extracted from cyrus.py."""
+"""Menu/UI functions."""
 
 import os
 import sys
