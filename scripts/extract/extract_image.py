@@ -1,4 +1,4 @@
-"""Image extraction dispatcher — routes to format-specific extractors.
+"""Image extraction entry point and dispatcher — routes to format-specific extractors.
 
 Format-specific logic lives in:
 - scripts.extract.extract_payload : payload.bin
@@ -92,7 +92,7 @@ def decompress_img(source, distance=None, keep=1):
 
 
 def decompress(infile, flag=4):
-    """Batch decompress dispatcher for dat.br / dat / img files."""
+    """Batch extraction entry point for dat.br / dat / img files."""
     if flag in (2, 3):
         from scripts.extract.extract_dat import decompress_dat_batch
         decompress_dat_batch(infile, flag)

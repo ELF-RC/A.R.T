@@ -21,7 +21,7 @@ def _win_partition(source):
 
 def decompress_win(infile_list):
     """Extract .win archives (image or tar format) into WORKSPACE."""
-    from scripts.extract.extract_dispatch import decompress_img
+    from scripts.extract.extract_image import decompress_img
 
     groups = {}
     for source in infile_list:
