@@ -2,7 +2,7 @@
 
 Format-specific logic lives in:
 - scripts.extract.payload : payload.bin
-- scripts.extract.dat     : new.dat / new.dat.br
+- scripts.extract.dat_br     : new.dat / new.dat.br
 - scripts.extract.ext4    : EXT4 / sparse images
 - scripts.extract.erofs   : EROFS images
 - scripts.extract.super   : super.img
@@ -94,7 +94,7 @@ def decompress_img(source, distance=None, keep=1):
 def decompress(infile, flag=4):
     """Batch extraction entry point for dat.br / dat / img files."""
     if flag in (2, 3):
-        from scripts.extract.dat import decompress_dat_batch
+        from scripts.extract.dat_br import decompress_dat_batch
         decompress_dat_batch(infile, flag)
         return
 
