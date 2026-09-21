@@ -6,10 +6,138 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from scripts.primary.utils import V, RED, GREEN, YELLOW, CLOSE, display, call
-from scripts.primary import sdat2img
-from scripts.primary.utils import gettype, findfile
 from scripts.primary.workspace import LayoutError
 from scripts.primary.workspace import partition_name, workspace_partition
+
+
+# Embedded DAT-to-image converter; this module no longer imports sdat2img.py.
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""Safely reconstruct a raw image from a non-incremental Android DAT bundle."""
+
+
+from pathlib import Path
+
+
+BLOCK_SIZE = 4096
+
+
+class SdatError(RuntimeError):
+    """Raised when a DAT bundle is incomplete or requires unsupported OTA state."""
+
+
+def _rangeset(source):
+    try:
+        values = [int(item) for item in source.strip().split(',')]
+    except ValueError as error:
+        raise SdatError(f'无法解析块范围: {source!r}') from error
+    if not values or len(values) != values[0] + 1:
+        raise SdatError(f'块范围长度无效: {source!r}')
+
+    ranges = []
+    for index in range(1, len(values), 2):
+        begin, end = values[index:index + 2]
+        if begin < 0 or end < begin:
+            raise SdatError(f'块范围无效: {source!r}')
+        ranges.append((begin, end))
+    return tuple(ranges)
+
+
+def _parse_transfer_list(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as stream:
+            version = int(stream.readline().strip())
+            new_blocks = int(stream.readline().strip())
+            if new_blocks < 0:
+                raise SdatError('transfer.list 的块数不能为负数')
+            if version >= 2:
+                stream.readline()
+                stream.readline()
+
+            commands = []
+            for line_number, raw_line in enumerate(stream, start=5 if version >= 2 else 3):
+                fields = raw_line.split()
+                if not fields:
+                    continue
+                command = fields[0]
+                if command in {'new', 'zero', 'erase'}:
+                    if len(fields) != 2:
+                        raise SdatError(f'transfer.list 第 {line_number} 行缺少范围')
+                    commands.append((command, _rangeset(fields[1])))
+                elif command[0].isdigit():
+                    # transfer list comments/generated counters are not commands.
+                    continue
+                else:
+                    raise SdatError(
+                        f'不支持增量 OTA 命令 {command!r}；需要完整 new.dat 固件而非补丁包。'
+                    )
+    except OSError as error:
+        raise SdatError(f'无法读取 transfer.list: {path}: {error}') from error
+    except ValueError as error:
+        raise SdatError(f'transfer.list 头部无效: {path}') from error
+    return version, new_blocks, commands
+
+
+def _write_zeroes(output, count):
+    zeroes = b'\0' * min(BLOCK_SIZE, 1024 * 1024)
+    remaining = count * BLOCK_SIZE
+    while remaining:
+        block = zeroes[:min(len(zeroes), remaining)]
+        if output.write(block) != len(block):
+            raise SdatError('写入零块失败')
+        remaining -= len(block)
+
+
+def _sdat2img_main(transfer_list_file, new_data_file, output_image_file):
+    """Build one raw image and remove an incomplete output on failure."""
+    version, new_blocks, commands = _parse_transfer_list(transfer_list_file)
+    print(f'sdat2img binary - version: 1.2\n')
+    android_versions = {
+        1: 'Android Lollipop 5.0',
+        2: 'Android Lollipop 5.1',
+        3: 'Android Marshmallow 6.x',
+        4: 'Android Nougat 7.x / Oreo 8.x',
+    }
+    print(f'{android_versions.get(version, "Unknown Android")} detected!\n')
+
+    output_path = Path(output_image_file)
+    source_path = Path(new_data_file)
+    if output_path.exists() or output_path.is_symlink():
+        raise SdatError(f'输出镜像已存在，拒绝覆盖: {output_path}')
+
+    largest_block = new_blocks
+    for _, ranges in commands:
+        for _, end in ranges:
+            largest_block = max(largest_block, end)
+
+    try:
+        with open(source_path, 'rb') as new_data, open(output_path, 'xb') as output:
+            for command, ranges in commands:
+                for begin, end in ranges:
+                    block_count = end - begin
+                    output.seek(begin * BLOCK_SIZE)
+                    if command == 'new':
+                        print(f'\rCopying {block_count} blocks into position {begin}...', end='')
+                        for _ in range(block_count):
+                            block = new_data.read(BLOCK_SIZE)
+                            if len(block) != BLOCK_SIZE:
+                                raise SdatError('new.dat 在完整写入镜像前结束')
+                            if output.write(block) != BLOCK_SIZE:
+                                raise SdatError('写入 raw image 失败')
+                    else:
+                        _write_zeroes(output, block_count)
+            output.truncate(largest_block * BLOCK_SIZE)
+            output.flush()
+    except Exception:
+        try:
+            output_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+    print(f'Done! Output image: {output_path.resolve()}')
+    return str(output_path)
+
 
 
 def _numbered_fragments(source):
@@ -56,7 +184,7 @@ def _combine_fragments(source):
 
 def decompress_dat(transfer, source, distance=None, keep=0):
     """Convert DAT directly: read transfer.list + dat from INPUT, extract to partition."""
-    from scripts.extract.image import decompress_img
+    from scripts.primary.extract_main import decompress_img
 
     del distance, keep
     if not transfer or not os.path.isfile(transfer):
@@ -72,12 +200,12 @@ def decompress_dat(transfer, source, distance=None, keep=0):
         combined = _combine_fragments(source)
         raw_image = os.path.join(V.workspace, f'{partition}.img')
         display(f"正在分解: {os.path.basename(combined)} ...", 3)
-        sdat2img.main(transfer, combined, raw_image)
+        _sdat2img_main(transfer, combined, raw_image)
         if not os.path.isfile(raw_image):
-            raise sdat2img.SdatError('未生成 raw image')
+            raise SdatError('未生成 raw image')
         print("\x1b[1;32m [%ds]\x1b[0m" % (_time.time() - s_time))
         decompress_img(raw_image, workspace_partition(partition))
-    except (LayoutError, OSError, ValueError, sdat2img.SdatError) as error:
+    except (LayoutError, OSError, ValueError, SdatError) as error:
         print(f'> DAT 分解失败: {error}')
     finally:
         for f in (combined, raw_image):
@@ -147,7 +275,7 @@ def _decompress_single_partition(item, flag):
         elif flag == 3:
             decompress_dat(item["transfer"], item["path"])
         return {"partition": name, "success": True, "error": None}
-    except (LayoutError, OSError, ValueError, sdat2img.SdatError) as error:
+    except (LayoutError, OSError, ValueError, SdatError) as error:
         return {"partition": name, "success": False, "error": str(error)}
 
 

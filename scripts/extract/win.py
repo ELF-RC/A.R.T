@@ -1,57 +1,116 @@
-"""Win archive extraction — 解包 .win 格式镜像包。"""
+"""Standalone .win archive extraction."""
+
+from __future__ import annotations
 
 import os
+import re
 import shutil
+import sys
 import tarfile
 from pathlib import Path
 
-from scripts.primary.utils import V, display, safe_extract_tar
-from scripts.primary.utils import gettype, findfile
-from scripts.primary.workspace import LayoutError, ProjectLayout
-from scripts.primary.workspace import (
-    workspace_partition, create_partition_stage,
-    _commit_extracted_partition,
-)
+from scripts.primary.utils import V, display, gettype
 
 
-def _win_partition(source):
-    name = os.path.basename(source)
-    return ProjectLayout.validate_component(name.split('.', 1)[0], "分区")
+class LayoutError(RuntimeError):
+    """Raised when a WIN archive or its output layout is invalid."""
+
+
+_SAFE_COMPONENT = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*\Z')
+
+
+def _validate_component(name: str, label: str = '分区') -> str:
+    if not isinstance(name, str) or not _SAFE_COMPONENT.fullmatch(name):
+        raise LayoutError(f'非法{label}名称: {name!r}')
+    if name in {'.', '..', 'config', 'INPUT', 'OUT', 'WORKSPACE'}:
+        raise LayoutError(f'保留{label}名称: {name!r}')
+    return name
+
+
+def _workspace_partition(partition: str) -> Path:
+    partition = _validate_component(partition)
+    workspace_value = getattr(V, 'workspace', None)
+    if not workspace_value or workspace_value == 'None':
+        raise LayoutError('工作目录尚未初始化')
+    workspace = Path(workspace_value)
+    if workspace.is_symlink() or not workspace.is_dir():
+        raise LayoutError(f'工作目录无效: {workspace}')
+    path = workspace / partition
+    if path.resolve().parent != workspace.resolve():
+        raise LayoutError(f'分区目录越界: {path}')
+    if path.is_symlink() or (path.exists() and not path.is_dir()):
+        raise LayoutError(f'分区目录无效: {path}')
+    return path
+
+
+def _create_partition_stage(partition: str) -> Path:
+    partition_dir = _workspace_partition(partition)
+    if partition_dir.exists():
+        shutil.rmtree(partition_dir)
+    partition_dir.mkdir(parents=True, exist_ok=True)
+    return partition_dir
+
+
+def _safe_extract_tar(archive: tarfile.TarFile, destination: Path) -> None:
+    """Extract only regular files/directories within destination."""
+    destination = destination.resolve()
+    if destination.is_symlink() or not destination.is_dir():
+        raise LayoutError(f'TAR 输出目录无效: {destination}')
+    for member in archive:
+        if not (member.isdir() or member.isfile()) or member.issym() or member.islnk():
+            raise LayoutError(f'TAR 不支持的条目类型: {member.name}')
+        target = (destination / member.name).resolve()
+        try:
+            target.relative_to(destination)
+        except ValueError as error:
+            raise LayoutError(f'TAR 包含越界路径: {member.name}') from error
+        if sys.version_info >= (3, 12):
+            archive.extract(member, path=destination, filter='fully_trusted')
+        else:
+            archive.extract(member, path=destination)
+
+
+def _win_partition(source: str) -> str:
+    return _validate_component(os.path.basename(source).split('.', 1)[0])
 
 
 def decompress_win(infile_list):
-    """Extract .win archives (image or tar format) into WORKSPACE."""
-    from scripts.extract.image import decompress_img
-
+    """Extract image-form or TAR-form WIN archives into WORKSPACE."""
     groups = {}
     for source in infile_list:
-        if os.path.isfile(source):
-            try:
-                groups.setdefault(_win_partition(source), []).append(source)
-            except LayoutError as error:
-                print(f'> 跳过 {source}: {error}')
-
-    for partition, fragments in groups.items():
-        staged_win = os.path.join(V.workspace, f'{partition}.win')
-        fragments.sort(key=lambda item: (not item.endswith('.win'), os.path.basename(item)))
-        with open(staged_win, 'wb') as destination_file:
-            for fragment in fragments:
-                print(f'合并 {fragment} 到 {staged_win}')
-                with open(fragment, 'rb') as source_file:
-                    shutil.copyfileobj(source_file, destination_file)
-
+        if not os.path.isfile(source):
+            continue
         try:
-            if gettype(staged_win) in ['erofs', 'ext', 'sparse', 'super', 'boot', 'vendor_boot']:
-                decompress_img(staged_win, workspace_partition(partition))
+            groups.setdefault(_win_partition(source), []).append(source)
+        except LayoutError as error:
+            print(f'> 跳过 {source}: {error}')
+
+    workspace_value = getattr(V, 'workspace', None)
+    if not workspace_value or workspace_value == 'None':
+        print('> 工作目录尚未初始化')
+        return
+    for partition, fragments in groups.items():
+        staged_win = Path(workspace_value) / f'{partition}.win'
+        fragments.sort(key=lambda item: (not item.endswith('.win'), os.path.basename(item)))
+        try:
+            with open(staged_win, 'wb') as destination_file:
+                for fragment in fragments:
+                    print(f'合并 {fragment} 到 {staged_win}')
+                    with open(fragment, 'rb') as source_file:
+                        shutil.copyfileobj(source_file, destination_file)
+            file_type = gettype(str(staged_win))
+            if file_type in {'erofs', 'ext', 'sparse', 'super', 'boot', 'vendor_boot'}:
+                from scripts.primary.extract_main import decompress_img
+                decompress_img(str(staged_win), str(_workspace_partition(partition)))
             elif tarfile.is_tarfile(staged_win):
-                _, staged_partition, _ = create_partition_stage(partition, 'tar-extract')
+                staged_partition = _create_partition_stage(partition)
                 with tarfile.open(staged_win, 'r') as archive:
-                    safe_extract_tar(archive, staged_partition)
-                if not _commit_extracted_partition(partition, staged_partition, set()):
-                    continue
+                    _safe_extract_tar(archive, staged_partition)
                 print(f'> {partition} TAR 分解完成')
             else:
-                input("未知格式")
+                input('未知格式')
+        except (LayoutError, OSError, tarfile.TarError) as error:
+            print(f'> {partition} WIN 分解失败: {error}')
         finally:
-            if os.path.isfile(staged_win):
-                os.remove(staged_win)
+            if staged_win.is_file():
+                staged_win.unlink()
