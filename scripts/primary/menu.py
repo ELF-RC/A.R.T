@@ -12,13 +12,13 @@ from scripts.primary.utils import (
 from scripts.primary.config import load_setup_json, env_setup, check_permissions
 from scripts.primary.workspace import envelop_project, workspace_partition
 from scripts.primary.workspace import LayoutError, UnsupportedLayoutError
-from scripts.extract.extract_image import decompress, extract_zrom, decompress_img
-from scripts.extract.extract_payload import decompress_bin
-from scripts.extract.extract_win import decompress_win
-from scripts.remake.make_img import recompress
-from scripts.remake.make_super import repack_super
-from scripts.extract.extract_boot import boot_unpack
-from scripts.remake.make_boot import boot_repack
+from scripts.extract.image import decompress, extract_zrom, decompress_img
+from scripts.extract.payload import decompress_bin
+from scripts.extract.win import decompress_win
+from scripts.remake.img import recompress
+from scripts.remake.super import repack_super
+from scripts.extract.boot import boot_unpack
+from scripts.remake.boot import boot_repack
 
 MOD_DIR = PWD_DIR + "local/sub/"
 
