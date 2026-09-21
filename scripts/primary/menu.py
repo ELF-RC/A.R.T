@@ -301,8 +301,8 @@ def menu_main():
             quiet()
             decompress_win(list(set(sorted(infile))))
         elif int(option) == 6:
-            from scripts.primary import lpunpack2
-            lpunpack2.main()
+            from scripts.extract.super import super_selective_main
+            super_selective_main()
             input('> 任意键继续')
             continue
         elif int(option) == 12:
