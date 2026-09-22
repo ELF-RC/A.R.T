@@ -1,4 +1,4 @@
-"""TOOL_INFO - 工具说明与作者信息"""
+"""ABOUT - 工具说明与作者信息"""
 
 import os
 

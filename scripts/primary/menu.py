@@ -124,7 +124,7 @@ def menu_once():
             env_setup()
             load_setup_json()
         elif int(choice) == 88:
-            from scripts.primary import tool_info as _ti
+            from scripts.primary import about as _ti
             _ti.show()
         elif int(choice) == 0:
             if creat_project():
@@ -242,7 +242,7 @@ def menu_modules():
 
 
 def _tool_info_handler():
-    from scripts.primary import tool_info as _ti
+    from scripts.primary import about as _ti
     _ti.show()
 
 
