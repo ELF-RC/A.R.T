@@ -457,7 +457,7 @@ def _decompress_payload_images(payload, payload_dir, mode):
         return
 
     # Only after confirmation do we connect to the image dispatcher.
-    from scripts.primary.extract_main import decompress_img
+    from scripts.extract.image import decompress_img
 
     for image in images:
         try:

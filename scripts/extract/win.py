@@ -100,7 +100,7 @@ def decompress_win(infile_list):
                         shutil.copyfileobj(source_file, destination_file)
             file_type = gettype(str(staged_win))
             if file_type in {'erofs', 'ext', 'sparse', 'super', 'boot', 'vendor_boot'}:
-                from scripts.primary.extract_main import decompress_img
+                from scripts.extract.image import decompress_img
                 decompress_img(str(staged_win), str(_workspace_partition(partition)))
             elif tarfile.is_tarfile(staged_win):
                 staged_partition = _create_partition_stage(partition)

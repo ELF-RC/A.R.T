@@ -107,7 +107,7 @@ def extract_super(working_source, partition):
 
     Returns True if handled (either extracted or moved to OUT), False on failure.
     """
-    from scripts.primary.extract_main import decompress_img
+    from scripts.extract.image import decompress_img
 
     display(f'正在分解: {os.path.basename(working_source)} <super>', 3)
     super_dir = os.path.join(V.workspace, 'super') + os.sep

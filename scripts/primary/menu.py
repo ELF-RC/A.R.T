@@ -12,7 +12,7 @@ from scripts.primary.utils import (
 from scripts.primary.config import load_setup_json, env_setup, check_permissions
 from scripts.primary.workspace import envelop_project, workspace_partition
 from scripts.primary.workspace import LayoutError, UnsupportedLayoutError
-from scripts.primary.extract_main import decompress, extract_zrom, decompress_img
+from scripts.extract.image import decompress, extract_zrom, decompress_img
 from scripts.extract.payload import decompress_bin
 from scripts.extract.win import decompress_win
 from scripts.remake.ext4 import recompress_ext4
