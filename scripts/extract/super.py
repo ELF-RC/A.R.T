@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
-from scripts.primary.utils import V, display
+from scripts.primary.utils import V, display, is_sparse_image, sparse_to_raw
 from scripts.primary.workspace import LayoutError
 from scripts.primary.workspace import workspace_partition
 
@@ -145,10 +145,6 @@ from string import Template
 from timeit import default_timer as dti
 from typing import IO, Dict, List, TypeVar, cast, BinaryIO, Tuple
 
-SPARSE_HEADER_MAGIC = 0xED26FF3A
-SPARSE_HEADER_SIZE = 28
-SPARSE_CHUNK_HEADER_SIZE = 12
-
 LP_PARTITION_RESERVED_BYTES = 4096
 LP_METADATA_GEOMETRY_MAGIC = 0x616c4467
 LP_METADATA_GEOMETRY_SIZE = 4096
@@ -266,40 +262,6 @@ class ShowJsonInfo(json.JSONEncoder):
             "block_devices": list(map(self._remove_ignore_keys, data["block_devices"]))
         }
         return super().encode(result)
-
-
-class SparseHeader:
-    def __init__(self, buffer):
-        fmt = '<I4H4I'
-        (
-            self.magic,  # 0xed26ff3a
-            self.major_version,  # (0x1) - reject images with higher major versions
-            self.minor_version,  # (0x0) - allow images with higher minor versions
-            self.file_hdr_sz,  # 28 bytes for first revision of the file format
-            self.chunk_hdr_sz,  # 12 bytes for first revision of the file format
-            self.blk_sz,  # block size in bytes, must be a multiple of 4 (4096)
-            self.total_blks,  # total blocks in the non-sparse output image
-            self.total_chunks,  # total chunks in the sparse input image
-            self.image_checksum  # CRC32 checksum of the original data, counting "don't care"
-        ) = struct.unpack(fmt, buffer[0:struct.calcsize(fmt)])
-
-
-class SparseChunkHeader:
-    """
-        Following a Raw or Fill or CRC32 chunk is data.
-        For a Raw chunk, it's the data in chunk_sz * blk_sz.
-        For a Fill chunk, it's 4 bytes of the fill data.
-        For a CRC32 chunk, it's 4 bytes of CRC32
-     """
-
-    def __init__(self, buffer):
-        fmt = '<2H2I'
-        (
-            self.chunk_type,  # 0xCAC1 -> raw; 0xCAC2 -> fill; 0xCAC3 -> don't care */
-            self.reserved,
-            self.chunk_sz,  # in blocks in output image * /
-            self.total_sz,  # in bytes of chunk input file including chunk header and data * /
-        ) = struct.unpack(fmt, buffer[0:struct.calcsize(fmt)])
 
 
 class LpMetadataBase:
@@ -744,122 +706,6 @@ class UnpackJob:
     total_size: int = field(default=0)
 
 
-class SparseImage:
-    """Read Android sparse images without loading large chunks into memory."""
-
-    _IO_CHUNK_SIZE = 1024 * 1024
-
-    def __init__(self, fd):
-        self._fd = fd
-        self.header = None
-
-    def _read_exact(self, size, description):
-        data = self._fd.read(size)
-        if len(data) != size:
-            raise LpUnpackError(f'Sparse image {description} is truncated.')
-        return data
-
-    def check(self):
-        self._fd.seek(0)
-        header_data = self._fd.read(SPARSE_HEADER_SIZE)
-        if len(header_data) != SPARSE_HEADER_SIZE:
-            return False
-        self.header = SparseHeader(header_data)
-        return self.header.magic == SPARSE_HEADER_MAGIC
-
-    def _skip_chunk_header_extension(self):
-        extension_size = self.header.chunk_hdr_sz - SPARSE_CHUNK_HEADER_SIZE
-        if extension_size < 0:
-            raise LpUnpackError('Sparse image has an invalid chunk header size.')
-        if extension_size:
-            self._read_exact(extension_size, 'chunk header extension')
-
-    def _consume(self, size, description):
-        remaining = size
-        while remaining:
-            chunk = self._fd.read(min(remaining, self._IO_CHUNK_SIZE))
-            if not chunk:
-                raise LpUnpackError(f'Sparse image {description} is truncated.')
-            remaining -= len(chunk)
-
-    def _write_repeated(self, out, pattern, size):
-        if not pattern:
-            raise LpUnpackError('Sparse image fill pattern is empty.')
-        block = (pattern * ((self._IO_CHUNK_SIZE + len(pattern) - 1) // len(pattern)))[:self._IO_CHUNK_SIZE]
-        remaining = size
-        while remaining:
-            count = min(remaining, len(block))
-            if out.write(block[:count]) != count:
-                raise LpUnpackError('Failed to write unsparsed image.')
-            remaining -= count
-
-    def unsparse(self):
-        if not self.header:
-            self._fd.seek(0)
-            self.header = SparseHeader(self._read_exact(SPARSE_HEADER_SIZE, 'header'))
-        if self.header.magic != SPARSE_HEADER_MAGIC:
-            raise LpUnpackError('Invalid sparse image magic.')
-        if self.header.file_hdr_sz < SPARSE_HEADER_SIZE:
-            raise LpUnpackError('Sparse image has an invalid file header size.')
-        if self.header.chunk_hdr_sz < SPARSE_CHUNK_HEADER_SIZE:
-            raise LpUnpackError('Sparse image has an invalid chunk header size.')
-        if self.header.blk_sz <= 0:
-            raise LpUnpackError('Sparse image has an invalid block size.')
-
-        self._fd.seek(self.header.file_hdr_sz - SPARSE_HEADER_SIZE, 1)
-        unsparse_file_dir = os.path.dirname(self._fd.name)
-        unsparse_file = os.path.join(
-            unsparse_file_dir,
-            f"{os.path.splitext(os.path.basename(self._fd.name))[0]}.unsparse.img",
-        )
-        logical_size = 0
-        with open(unsparse_file, 'wb') as out:
-            for _ in range(self.header.total_chunks):
-                chunk_header = SparseChunkHeader(
-                    self._read_exact(SPARSE_CHUNK_HEADER_SIZE, 'chunk header')
-                )
-                self._skip_chunk_header_extension()
-                output_size = chunk_header.chunk_sz * self.header.blk_sz
-                chunk_data_size = chunk_header.total_sz - self.header.chunk_hdr_sz
-                if chunk_data_size < 0:
-                    raise LpUnpackError('Sparse image chunk size is invalid.')
-
-                if chunk_header.chunk_type == 0xCAC1:  # RAW
-                    if chunk_data_size != output_size:
-                        raise LpUnpackError('Sparse RAW chunk size is invalid.')
-                    remaining = output_size
-                    while remaining:
-                        size = min(self._IO_CHUNK_SIZE, remaining)
-                        data = self._read_exact(size, 'RAW chunk')
-                        if out.write(data) != size:
-                            raise LpUnpackError('Failed to write unsparsed image.')
-                        remaining -= size
-                elif chunk_header.chunk_type == 0xCAC2:  # FILL
-                    if chunk_data_size != 4:
-                        raise LpUnpackError('Sparse FILL chunk size is invalid.')
-                    fill = self._read_exact(4, 'FILL chunk')
-                    self._write_repeated(out, fill, output_size)
-                elif chunk_header.chunk_type == 0xCAC3:  # DONT_CARE
-                    if chunk_data_size:
-                        self._consume(chunk_data_size, 'DONT_CARE chunk')
-                    out.seek(output_size, 1)
-                elif chunk_header.chunk_type == 0xCAC4:  # CRC32
-                    if output_size or chunk_data_size != 4:
-                        raise LpUnpackError('Sparse CRC32 chunk size is invalid.')
-                    self._read_exact(4, 'CRC32 chunk')
-                else:
-                    raise LpUnpackError(
-                        f'Unsupported sparse chunk type: {chunk_header.chunk_type:#x}'
-                    )
-                logical_size += output_size
-
-            expected_size = self.header.total_blks * self.header.blk_sz
-            if logical_size != expected_size:
-                raise LpUnpackError('Sparse image logical size does not match its header.')
-            out.truncate(expected_size)
-        return unsparse_file
-
-
 T = TypeVar('T')
 
 
@@ -870,7 +716,14 @@ class LpUnpack:
         self._show_info_format = kwargs.get('SHOW_INFO_FORMAT', FormatType.TEXT)
         self._config = kwargs.get('CONFIG', None)
         self._slot_num = None
-        self._fd: BinaryIO = open(kwargs.get('SUPER_IMAGE'), 'rb')
+        super_image = kwargs.get('SUPER_IMAGE')
+        if is_sparse_image(super_image):
+            print('Sparse image detected.')
+            print('Process conversion to non sparse image...')
+            super_image = sparse_to_raw(super_image)
+            print('Result:[ok]')
+        self._super_image = super_image
+        self._fd: BinaryIO = open(super_image, 'rb')
         self._out_dir = kwargs.get('OUTPUT_DIR', None)
 
     def _check_out_dir_exists(self):
@@ -1022,14 +875,6 @@ class LpUnpack:
 
     def get_info(self):
         try:
-            if SparseImage(self._fd).check():
-                print('Sparse image detected.')
-                print('Process conversion to non sparse image...')
-                unsparse_file = SparseImage(self._fd).unsparse()
-                self._fd.close()
-                self._fd = open(str(unsparse_file), 'rb')
-                print('Result:[ok]')
-
             self._fd.seek(0)
             metadata = self._read_metadata()
 
@@ -1049,14 +894,6 @@ class LpUnpack:
 
     def unpack(self):
         try:
-            if SparseImage(self._fd).check():
-                print('Sparse image detected.')
-                print('Process conversion to non sparse image...')
-                unsparse_file = SparseImage(self._fd).unsparse()
-                self._fd.close()
-                self._fd = open(str(unsparse_file), 'rb')
-                print('Result:[ok]')
-
             self._fd.seek(0)
             metadata = self._read_metadata()
 
@@ -1160,16 +997,7 @@ def _human_size(b):
 def _list_partitions(super_img_path):
     """Parse super metadata and return (sorted_partition_info, effective_img_path)."""
     job = LpUnpack(SUPER_IMAGE=super_img_path, SHOW_INFO=False)
-    effective_path = super_img_path
-    # sparse 检测：只转换一次，后续复用转换结果
-    if SparseImage(job._fd).check():
-        print('Sparse image detected.')
-        print('Process conversion to non sparse image...')
-        unsparse_file = SparseImage(job._fd).unsparse()
-        job._fd.close()
-        effective_path = str(unsparse_file)
-        job._fd = open(effective_path, 'rb')
-        print('Result:[ok]')
+    effective_path = job._super_image
     job._fd.seek(0)
     metadata = job._read_metadata()
     result = []

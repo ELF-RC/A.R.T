@@ -65,8 +65,12 @@ def decompress_img(source, distance=None, keep=1):
             print(f'> {partition} boot 分解失败: {error}')
 
     elif file_type == 'sparse':
-        from scripts.extract.ext4 import convert_sparse
-        raw_source = convert_sparse(working_source)
+        from scripts.primary.utils import sparse_to_raw
+        try:
+            raw_source = sparse_to_raw(working_source)
+        except Exception as error:
+            print(f'> Sparse 转换失败: {error}')
+            raw_source = None
         if raw_source:
             decompress_img(raw_source, destination)
         return

@@ -3,9 +3,11 @@
 import os
 from pathlib import Path
 
-from scripts.primary.utils import V, RED, GREEN, YELLOW, CLOSE, display, call, CoastTime
+from scripts.primary.utils import (
+    V, RED, GREEN, YELLOW, CLOSE, display, call, CoastTime,
+    is_sparse_image, sparse_to_raw, raw_to_sparse,
+)
 from scripts.primary.utils import gettype, findfile
-from scripts.primary import imgextractor
 from scripts.primary.workspace import LayoutError
 
 
@@ -22,6 +24,7 @@ def repack_super(selected_parts, super_type, super_sparse):
     group_name = V.SETUP_MANIFEST['GROUP_NAME']
     super_size = V.SETUP_MANIFEST['SUPER_SIZE']
     super_output = os.path.join(V.out, 'super.img')
+    lpmake_output = super_output if super_sparse == 0 else super_output + '.raw'
     type_names = {0: 'A-only', 1: 'A/B', 2: 'Virtual A/B'}
 
     argvs = [
@@ -35,9 +38,9 @@ def repack_super(selected_parts, super_type, super_sparse):
     raw_parts = []
     try:
         for name, path in selected_parts:
-            if gettype(path) == 'sparse':
+            if is_sparse_image(path):
                 display(f'转换 sparse: {os.path.basename(path)} ...')
-                raw = imgextractor.ULTRAMAN().APPLE(path)
+                raw = sparse_to_raw(path)
                 if not raw or not os.path.isfile(raw):
                     print(f'> 无法转换 sparse 镜像: {path}')
                     return
@@ -73,9 +76,9 @@ def repack_super(selected_parts, super_type, super_sparse):
                 ])
                 b_path = os.path.join(input_dir, f'{name}_b.img')
                 if os.path.isfile(b_path):
-                    if gettype(b_path) == 'sparse':
+                    if is_sparse_image(b_path):
                         display(f'转换 sparse: {os.path.basename(b_path)} ...')
-                        b_raw = imgextractor.ULTRAMAN().APPLE(b_path)
+                        b_raw = sparse_to_raw(b_path)
                         if b_raw and os.path.isfile(b_raw):
                             b_path = b_raw
                     size_b = os.path.getsize(b_path)
@@ -108,16 +111,28 @@ def repack_super(selected_parts, super_type, super_sparse):
         print('> 未选择任何分区镜像')
         return
 
-    if super_sparse == 1:
-        argvs.append('--sparse')
-    argvs.extend(['--out', super_output])
+    # lpmake always creates the raw container here; utils.py owns the
+    # final raw -> sparse conversion when the user requests sparse output.
+    argvs.extend(['--out', lpmake_output])
 
     display(f'重新合成: super.img <Size:{super_size}|Type:{type_names[super_type]}|Sparse:{super_sparse}>')
     display(f"包含分区：{'|'.join(image_parts)}")
     with CoastTime():
         result = call(argvs)
-    if result != 0 or not os.path.isfile(super_output):
+    if result != 0 or not os.path.isfile(lpmake_output):
         print('> super.img 合成失败')
         return
+
+    if super_sparse == 1:
+        try:
+            raw_to_sparse(lpmake_output, super_output)
+        except Exception as error:
+            print(f'> raw 转 sparse 失败: {error}')
+            return
+        finally:
+            try:
+                os.remove(lpmake_output)
+            except OSError:
+                pass
 
     print(f'> super.img 已输出到 {V.out}')

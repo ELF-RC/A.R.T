@@ -972,6 +972,7 @@ import os
 import re
 import struct
 from pathlib import Path
+from scripts.primary.utils import sparse_to_raw
 
 
 SPARSE_HEADER_MAGIC = 0xED26FF3A
@@ -1181,74 +1182,8 @@ class ULTRAMAN(object):
             return self.Simg2Rimg(target)
 
     def Simg2Rimg(self, target):
-        """Convert Android sparse data while preserving RAW/FILL/DONT_CARE chunks."""
-        def read_exact(stream, size, description):
-            data = stream.read(size)
-            if len(data) != size:
-                raise ValueError(f'稀疏镜像{description}被截断')
-            return data
-
-        with open(target, 'rb') as img_file:
-            if self.sign_offset > 0:
-                img_file.seek(self.sign_offset, 0)
-            header = EXT4_IMAGE_HEADER(read_exact(img_file, EXT4_SPARSE_HEADER_LEN, '文件头'))
-            if header.magic != SPARSE_HEADER_MAGIC:
-                raise ValueError(f'不是有效的稀疏镜像: {target}')
-            if header.chunk_header_size < EXT4_CHUNK_HEADER_SIZE:
-                raise ValueError(f'稀疏镜像 chunk header 无效: {target}')
-            if header.file_header_size > EXT4_SPARSE_HEADER_LEN:
-                read_exact(img_file, header.file_header_size - EXT4_SPARSE_HEADER_LEN, '扩展文件头')
-
-            unsparse_file = target.replace('.img', '.unsparse.img')
-            with open(unsparse_file, 'wb') as raw_img_file:
-                for _ in range(header.total_chunks):
-                    chunk_header = EXT4_CHUNK_HEADER(
-                        read_exact(img_file, EXT4_CHUNK_HEADER_SIZE, 'chunk header')
-                    )
-                    if header.chunk_header_size > EXT4_CHUNK_HEADER_SIZE:
-                        read_exact(
-                            img_file,
-                            header.chunk_header_size - EXT4_CHUNK_HEADER_SIZE,
-                            '扩展 chunk header',
-                        )
-                    chunk_data_size = chunk_header.total_size - header.chunk_header_size
-                    output_size = chunk_header.chunk_size * header.block_size
-                    if chunk_data_size < 0:
-                        raise ValueError(f'稀疏镜像 chunk 大小无效: {target}')
-
-                    if chunk_header.type == 0xCAC1:  # RAW
-                        if chunk_data_size != output_size:
-                            raise ValueError(f'稀疏镜像 RAW chunk 大小无效: {target}')
-                        remaining = output_size
-                        while remaining:
-                            data = read_exact(img_file, min(1024 * 1024, remaining), 'RAW 数据')
-                            raw_img_file.write(data)
-                            remaining -= len(data)
-                    elif chunk_header.type == 0xCAC2:  # FILL
-                        if chunk_data_size != 4:
-                            raise ValueError(f'稀疏镜像 FILL chunk 大小无效: {target}')
-                        fill = read_exact(img_file, 4, 'FILL 数据')
-                        if output_size % len(fill):
-                            raise ValueError(f'稀疏镜像 FILL 输出大小无效: {target}')
-                        pattern = fill * (min(1024 * 1024, output_size) // len(fill))
-                        remaining = output_size
-                        while remaining:
-                            data = pattern[:min(len(pattern), remaining)]
-                            raw_img_file.write(data)
-                            remaining -= len(data)
-                    elif chunk_header.type == 0xCAC3:  # DONT_CARE
-                        if chunk_data_size:
-                            read_exact(img_file, chunk_data_size, 'DONT_CARE 数据')
-                        raw_img_file.seek(output_size, 1)
-                    elif chunk_header.type == 0xCAC4:  # CRC32
-                        if output_size:
-                            raise ValueError(f'稀疏镜像 CRC chunk 输出大小无效: {target}')
-                        read_exact(img_file, chunk_data_size, 'CRC 数据')
-                    else:
-                        raise ValueError(f'不支持的稀疏镜像 chunk 类型: {chunk_header.type:#x}')
-                raw_img_file.truncate(raw_img_file.tell())
-            return unsparse_file
-
+        """Convert sparse data through the shared utility module."""
+        return sparse_to_raw(target)
     def EXT4_EXTRACTOR(self):
         output_root = Path(self.EXTRACT_DIR).resolve()
         config_dir = output_root.parent / 'config'
@@ -1498,7 +1433,7 @@ def convert_sparse(working_source):
     """Convert a sparse image to raw format and return its path."""
     print(f"> 正在转换: Unsparse Format [{os.path.basename(working_source)}] ...")
     try:
-        raw_source = ULTRAMAN().APPLE(working_source)
+        raw_source = sparse_to_raw(working_source)
     except Exception as error:
         print(f"> Sparse 转换失败: {error}")
         return None
