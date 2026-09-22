@@ -1,13 +1,12 @@
-"""EXT4 image repack — 合成 EXT4 分区镜像及 DAT 包。"""
+"""EXT4 image repack — 合成 EXT4 分区镜像。"""
 
 import os
 import shutil
 import time
 
-from scripts.primary import fspatch, img2sdat
+from scripts.primary import fspatch
 from scripts.primary.utils import (
     CLOSE,
-    GREEN,
     RED,
     V,
     call,
@@ -16,6 +15,7 @@ from scripts.primary.utils import (
     get_dir_size,
 )
 from scripts.primary.workspace import load_image_json
+from scripts.remake.dat_br import recompress_dat_br
 
 
 def walk_contexts(path):
@@ -140,7 +140,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
     return True
 
 
-def _update_dynamic_partitions(label, distance, flag):
+def _update_dynamic_partitions(label, distance):
     if not os.path.isfile(distance):
         print(f" {RED}打包失败{CLOSE}")
         return
@@ -176,26 +176,7 @@ def _update_dynamic_partitions(label, distance, flag):
                 line = f"resize {label}_a {renew_size}\n"
             target.write(line)
 
-    if flag <= 9:
-        return
-    display(f"重新生成: {label}.new.dat ...", 3)
-    img2sdat.main(distance, V.out, 4, label)
-    newdat = os.path.join(V.out, f"{label}.new.dat")
-    if not os.path.isfile(newdat):
-        print(f" {RED}打包失败{CLOSE}")
-        return
-    print(" Done")
-    os.remove(distance)
-    if flag == 11:
-        level = V.SETUP_MANIFEST["REPACK_BR_LEVEL"]
-        display(f"重新生成: {label}.new.dat.br | Level={level} ...", 3)
-        newdat_brotli = f"{newdat}.br"
-        call(["brotli", f"-{level}jfo", newdat_brotli, newdat])
-        print(
-            f" {GREEN}打包成功{CLOSE}"
-            if os.path.isfile(newdat_brotli)
-            else f" {RED}打包失败{CLOSE}"
-        )
+    return True
 
 
 def recompress_ext4(source, fsconfig, contexts, dumpinfo, flag=8):
@@ -213,4 +194,5 @@ def recompress_ext4(source, fsconfig, contexts, dumpinfo, flag=8):
     )
     display(f"重新合成: {state['label']}.img ...", 4)
     if _write_image(state, fsconfig, contexts, source, flag):
-        _update_dynamic_partitions(state["label"], state["distance"], flag)
+        if _update_dynamic_partitions(state["label"], state["distance"]) and flag > 9:
+            recompress_dat_br(state["label"], state["distance"], flag)
