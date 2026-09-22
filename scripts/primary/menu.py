@@ -15,7 +15,8 @@ from scripts.primary.workspace import LayoutError, UnsupportedLayoutError
 from scripts.primary.extract_main import decompress, extract_zrom, decompress_img
 from scripts.extract.payload import decompress_bin
 from scripts.extract.win import decompress_win
-from scripts.remake.img import recompress
+from scripts.remake.ext4 import recompress_ext4
+from scripts.remake.erofs import recompress_erofs
 from scripts.remake.super import repack_super
 from scripts.extract.boot import boot_unpack
 from scripts.remake.boot import boot_repack
@@ -336,7 +337,10 @@ def menu_main():
                             display(f'是否合成: {f_basename}.{txts.get(int(option), ".new.dat.br")} [1/0]: ', end='')
                             if input() != '1':
                                 continue
-                        recompress(source, fsconfig, contexts, infojson, int(option))
+                        if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "1":
+                            recompress_erofs(source, fsconfig, contexts, infojson, int(option))
+                        else:
+                            recompress_ext4(source, fsconfig, contexts, infojson, int(option))
         else:
             input(f'\x1b[0;33m{option}\x1b[0m enter error !')
             continue
