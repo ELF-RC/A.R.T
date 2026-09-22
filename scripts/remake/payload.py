@@ -1,4 +1,4 @@
-"""MKBIN - 修补 payload.bin 卡刷包"""
+"""PAYLOAD - 修补 payload.bin 卡刷包"""
 
 import os
 import subprocess

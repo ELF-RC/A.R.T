@@ -28,8 +28,8 @@ def main():
         if choice in ('00', '0'):
             return
         elif choice in ('01', '1'):
-            from scripts.primary import mkbin
-            mkbin.main()
+            from scripts.remake import payload
+            payload.main()
             input('> 任意键继续')
         elif choice in ('02', '2'):
             from scripts.primary import avbtool
