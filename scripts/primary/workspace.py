@@ -302,11 +302,6 @@ def workspace_relative_path(relative_path):
     return V.layout.require_workspace_path(Path(V.workspace, relative))
 
 
-def _get_image_logical_size(source):
-    """Return logical size of an image (sparse-aware)."""
-    from scripts.primary.imgextractor import ULTRAMAN
-    return ULTRAMAN().LEMON(source)
-
 
 def _destination_partition(distance, source):
     if distance:
