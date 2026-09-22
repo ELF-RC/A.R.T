@@ -8,6 +8,7 @@ from scripts.primary.utils import (
     CLOSE,
     GREEN,
     RED,
+    RangeSet,
     V,
     call,
     display,
@@ -40,7 +41,6 @@ from tempfile import mkstemp
 from threading import Lock, Thread
 from collections import deque, OrderedDict
 from hashlib import sha1
-from scripts.primary.rangelib import RangeSet
 
 __all__ = ["EmptyImage", "DataImage", "BlockImageDiff"]
 

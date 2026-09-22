@@ -18,7 +18,7 @@ import sys
 import struct
 from hashlib import sha1
 
-from scripts.primary import rangelib
+from scripts.primary.utils import RangeSet
 
 
 class SparseImage:
@@ -69,7 +69,7 @@ class SparseImage:
         pos = 0  # in blocks
         care_data = []
         self.offset_map = offset_map = []
-        self.clobbered_blocks = rangelib.RangeSet(data=clobbered_blocks)
+        self.clobbered_blocks = RangeSet(data=clobbered_blocks)
 
         for i in range(total_chunks):
             header_bin = f.read(12)
@@ -112,7 +112,7 @@ class SparseImage:
                 raise ValueError("Unknown chunk type 0x%04X not supported" %
                                  (chunk_type,))
 
-        self.care_map = rangelib.RangeSet(care_data)
+        self.care_map = RangeSet(care_data)
         self.offset_index = [i[0] for i in offset_map]
 
         # Bug: 20881595
@@ -122,7 +122,7 @@ class SparseImage:
         # the extended blocks explicitly to avoid dm-verity failures. 512 blocks
         # are the maximum read-ahead we configure for dm-verity block devices.
         extended = self.care_map.extend(512)
-        all_blocks = rangelib.RangeSet(data=(0, self.total_blocks))
+        all_blocks = RangeSet(data=(0, self.total_blocks))
         extended = extended.intersect(all_blocks).subtract(self.care_map)
         self.extended = extended
 
@@ -207,7 +207,7 @@ class SparseImage:
         with open(fn) as f:
             for line in f:
                 fn, ranges = line.split(None, 1)
-                ranges = rangelib.RangeSet.parse(ranges)
+                ranges = RangeSet.parse(ranges)
                 out[fn] = ranges
                 assert ranges.size() == ranges.intersect(remaining).size()
 
@@ -276,10 +276,10 @@ class SparseImage:
         assert zero_blocks or nonzero_groups or clobbered_blocks
 
         if zero_blocks:
-            out["__ZERO"] = rangelib.RangeSet(data=zero_blocks)
+            out["__ZERO"] = RangeSet(data=zero_blocks)
         if nonzero_groups:
             for i, blocks in enumerate(nonzero_groups):
-                out["__NONZERO-%d" % i] = rangelib.RangeSet(data=blocks)
+                out["__NONZERO-%d" % i] = RangeSet(data=blocks)
         if clobbered_blocks:
             out["__COPY"] = clobbered_blocks
 
