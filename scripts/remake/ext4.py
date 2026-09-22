@@ -4,7 +4,6 @@ import os
 import shutil
 import time
 
-from scripts.primary import fspatch
 from scripts.primary.utils import (
     CLOSE,
     RED,
@@ -13,6 +12,7 @@ from scripts.primary.utils import (
     ceil,
     display,
     get_dir_size,
+    patch_fsconfig,
 )
 from scripts.primary.workspace import load_image_json
 from scripts.remake.dat_br import recompress_dat_br
@@ -35,7 +35,7 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
     if os.path.isfile(distance):
         os.remove(distance)
 
-    fspatch.main(source, fsconfig)
+    patch_fsconfig(source, fsconfig)
     walk_contexts(fsconfig)
     walk_contexts(contexts)
 
