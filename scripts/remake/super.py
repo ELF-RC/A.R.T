@@ -1,13 +1,11 @@
 """Super image repack — 打包 super.img 动态分区。"""
 
 import os
-from pathlib import Path
 
 from scripts.primary.utils import (
-    V, RED, GREEN, YELLOW, CLOSE, display, call, CoastTime,
+    V, display, call, CoastTime,
     is_sparse_image, sparse_to_raw, raw_to_sparse,
 )
-from scripts.primary.utils import gettype, findfile
 from scripts.primary.workspace import LayoutError
 
 
@@ -19,7 +17,6 @@ def repack_super(selected_parts, super_type, super_sparse):
         super_type: 0=A-only, 1=A/B, 2=Virtual A/B
         super_sparse: 1=sparse output, 0=raw output
     """
-    from scripts.primary.workspace import partition_name
 
     group_name = V.SETUP_MANIFEST['GROUP_NAME']
     super_size = V.SETUP_MANIFEST['SUPER_SIZE']

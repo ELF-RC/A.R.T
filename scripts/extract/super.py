@@ -5,7 +5,6 @@ import shutil
 from pathlib import Path
 
 from scripts.primary.utils import V, display, is_sparse_image, sparse_to_raw
-from scripts.primary.workspace import LayoutError
 from scripts.primary.workspace import workspace_partition
 
 
@@ -139,7 +138,6 @@ import json
 import os
 import re
 import struct
-import sys
 from dataclasses import dataclass, field
 from string import Template
 from timeit import default_timer as dti
@@ -626,13 +624,6 @@ class Metadata:
         finally:
             return result
 
-    @property
-    def get_info2(self):
-        parts = {}
-        for item in self.partitions:
-            parts[self.groups[item.group_index].name] = parts[self.groups[item.group_index].name] + item.name
-        return parts
-
     def to_json(self) -> str:
         data = self._get_info()
         if not data:
@@ -779,13 +770,6 @@ class LpUnpack:
             result.append(clazz(self._fd.read(size)))
             count -= 1
         return result
-
-    def _read_chunk(self, block_size):
-        while True:
-            data = self._fd.read(block_size)
-            if not data:
-                break
-            yield data
 
     def _read_metadata_header(self, metadata: Metadata):
         offsets = metadata.get_offsets()
@@ -938,13 +922,6 @@ def unpack(file: str, out: str, parts: list = None):
     else:
         LpUnpack(**vars(namespace)).unpack()
 
-
-def get_parts(file_):
-    namespace = argparse.Namespace(SUPER_IMAGE=file_, SHOW_INFO=False)
-    if not os.path.exists(namespace.SUPER_IMAGE):
-        raise FileNotFoundError(f"{namespace.SUPER_IMAGE} Cannot Find")
-    else:
-        return LpUnpack(**vars(namespace)).get_info()
 
 # Merged selective super-partition extraction UI.
 YELLOW = '\x1b[1;33m'

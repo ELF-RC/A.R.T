@@ -2,10 +2,9 @@
 
 import os
 import subprocess
-from pathlib import Path
 
 from scripts.primary.utils import V, BIN_PATH, display, call
-from scripts.primary.utils import gettype, findfile
+from scripts.primary.utils import findfile
 
 
 def dboot(infile, dist):

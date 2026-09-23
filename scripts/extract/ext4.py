@@ -7,7 +7,6 @@ can be used without importing any other A.R.T Python module.
 import ctypes
 from functools import cmp_to_key
 import io
-from math import log as log_math
 import queue
 
 
@@ -451,17 +450,6 @@ class MappingEntry:
     def copy(self):
         return MappingEntry(self.file_block_idx, self.disk_block_idx, self.block_count)
 
-    def create_mapping(*entries):
-        file_block_idx = 0
-        result = [None] * len(entries)
-
-        for i, entry in enumerate(entries):
-            disk_block_idx, block_count = entry
-            result[i] = MappingEntry(file_block_idx, disk_block_idx, block_count)
-            file_block_idx += block_count
-
-        return result
-
     @staticmethod
     def optimize(entries):
         entries.sort(key=lambda entry: entry.file_block_idx)
@@ -512,31 +500,6 @@ class Volume:
     @property
     def get_block_count(self):
         return self.superblock.s_blocks_count
-
-    @property
-    def get_mount_point(self):
-        return self.superblock.s_last_mounted.decode()
-
-    @property
-    def get_info_list(self):
-        data = [
-            ['Filesystem magic number', hex(self.superblock.s_magic).upper()],
-            ["Filesystem volume name", self.superblock.s_volume_name.decode()],
-            ["Filesystem UUID", self.uuid],
-            ['Last mounted on', self.superblock.s_last_mounted.decode()],
-            ["Block size", f"{1 << (10 + self.superblock.s_log_block_size)}"],
-            ["Block count", self.superblock.s_blocks_count],
-            ["Free inodes", self.superblock.s_free_inodes_count],
-            ["Free blocks", self.superblock.s_free_blocks_count],
-            ["Inodes per group", self.superblock.s_inodes_per_group],
-            ['Blocks per group', self.superblock.s_blocks_per_group],
-            ['Inode count', self.superblock.s_inodes_count],
-            ['Reserved GDT blocks', self.superblock.s_reserved_gdt_blocks],
-            ["Inode size", self.superblock.s_inode_size],
-            ['Filesystem created', self.superblock.s_mkfs_time],
-            ["Currect Size", self.get_block_count * self.block_size]
-        ]
-        return data
 
     def get_inode(self, inode_idx, file_type=InodeType.UNKNOWN):
         group_idx, inode_table_entry_idx = self.get_inode_group(inode_idx)
@@ -702,15 +665,6 @@ class Inode:
             return self.file_type == InodeType.SYMBOLIC_LINK
 
     @property
-    def is_in_use(self):
-        group_idx, bitmap_bit = self.volume.get_inode_group(self.inode_idx)
-
-        inode_usage_bitmap_offset = self.volume.group_descriptors[group_idx].bg_inode_bitmap * self.volume.block_size
-        inode_usage_byte = self.volume.read(inode_usage_bitmap_offset + bitmap_bit // 8, 1)[0]
-
-        return ((inode_usage_byte >> (7 - bitmap_bit % 8)) & 1) != 0
-
-    @property
     def mode_str(self):
         special_flag = lambda letter, execute, special: {
             (False, False): "-",
@@ -820,16 +774,6 @@ class Inode:
             # Inode uses inline data
             i_block = self.volume.read(self.offset + ext4_inode.i_block.offset, ext4_inode.i_block.size)
             return io.BytesIO(i_block[:self.inode.i_size])
-
-    @property
-    def size_readable(self):
-        if self.inode.i_size < 1024:
-            return "{0:d} bytes".format(self.inode.i_size) if self.inode.i_size != 1 else "1 byte"
-        else:
-            units = ["KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
-            unit_idx = min(int(log_math(self.inode.i_size, 1024)), len(units))
-
-            return f"{self.inode.i_size / (1024 ** unit_idx):.2f} {units[unit_idx - 1]:s}"
 
     def xattrs(self, check_inline=True, check_block=True, force_inline=False):
         # Inline xattrs
@@ -978,7 +922,6 @@ from scripts.primary.utils import sparse_to_raw
 SPARSE_HEADER_MAGIC = 0xED26FF3A
 EXT4_RAW_HEADER_MAGIC = 0xED26FF3A
 EXT4_SPARSE_HEADER_LEN = 28
-EXT4_CHUNK_HEADER_SIZE = 12
 LP_METADATA_HEADER_MAGIC = 1095520304
 EROFS_HEADER_MAGIC = 0xE0F5E1E2
 
@@ -992,12 +935,6 @@ class EXT4_IMAGE_HEADER(object):
     def __init__(self, buf):
         (self.magic, self.major, self.minor, self.file_header_size, self.chunk_header_size, self.block_size,
          self.total_blocks, self.total_chunks, self.crc32) = struct.unpack('<I4H4I', buf)
-
-
-class EXT4_CHUNK_HEADER(object):
-
-    def __init__(self, buf):
-        (self.type, self.reserved, self.chunk_size, self.total_size) = struct.unpack('<2H2I', buf)
 
 
 def is_valid_ext4_directory_entry(entry_name, entry_inode_idx):
@@ -1071,20 +1008,6 @@ class ULTRAMAN(object):
         header = EXT4_IMAGE_HEADER(img_file.read(28))
         imgsize = header.block_size * header.total_blocks
         img_file.close()
-
-        return imgsize
-
-    @staticmethod
-    def __ImgSizeFromRawFile(target):
-        with open(target, 'rb') as img_file:
-            m = ''
-            see = 1028
-
-            for i in reversed(range(4)):
-                img_file.seek(see + i)
-                m += img_file.read(1).hex()
-
-            imgsize = int('0x' + m, 16) * 4096
 
         return imgsize
 
@@ -1166,20 +1089,6 @@ class ULTRAMAN(object):
         self.__fix_size()
         self.EXT4_EXTRACTOR()
         return True
-
-    def LEMON(self, target):
-        if not os.path.exists(target):
-            return 0
-        target_type = self.GetImageType(target)
-        if target_type == 'simg':
-            return self.__ImgSizeFromSparseFile(target)
-        else:
-            return os.path.getsize(target)
-
-    def APPLE(self, target):
-        target_type = self.GetImageType(target)
-        if target_type == 'simg':
-            return self.Simg2Rimg(target)
 
     def Simg2Rimg(self, target):
         """Convert sparse data through the shared utility module."""
@@ -1427,17 +1336,3 @@ def extract_ext4(working_source, partition, destination):
     except Exception as error:
         print(f"> EXT4 分解失败: {error}")
         return False
-
-
-def convert_sparse(working_source):
-    """Convert a sparse image to raw format and return its path."""
-    print(f"> 正在转换: Unsparse Format [{os.path.basename(working_source)}] ...")
-    try:
-        raw_source = sparse_to_raw(working_source)
-    except Exception as error:
-        print(f"> Sparse 转换失败: {error}")
-        return None
-    if raw_source and os.path.isfile(raw_source):
-        return raw_source
-    print("> [Failed]")
-    return None

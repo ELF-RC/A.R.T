@@ -9,7 +9,7 @@ import sys
 import tarfile
 from pathlib import Path
 
-from scripts.primary.utils import V, display, gettype
+from scripts.primary.utils import V, gettype
 
 
 class LayoutError(RuntimeError):

@@ -2,7 +2,6 @@
 
 import os
 import subprocess
-import tempfile
 from pathlib import Path
 
 from scripts.primary.utils import V, BIN_PATH

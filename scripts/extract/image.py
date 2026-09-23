@@ -14,8 +14,8 @@ import os
 import time
 from glob import glob
 
-from scripts.primary.utils import V, RED, GREEN, YELLOW, CLOSE, display
-from scripts.primary.utils import gettype, findfile
+from scripts.primary.utils import V, RED, CLOSE, display
+from scripts.primary.utils import gettype
 from scripts.primary.workspace import LayoutError
 from scripts.primary.workspace import (
     partition_name, workspace_partition, workspace_temp,

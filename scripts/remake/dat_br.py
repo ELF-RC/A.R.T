@@ -42,7 +42,7 @@ from threading import Lock, Thread
 from collections import deque, OrderedDict
 from hashlib import sha1
 
-__all__ = ["EmptyImage", "DataImage", "BlockImageDiff"]
+__all__ = ["EmptyImage", "BlockImageDiff"]
 
 
 class Settings(object):
@@ -94,10 +94,6 @@ class Image(object):
     def ReadRangeSet(self, ranges):
         raise NotImplementedError
 
-    def TotalSha1(self, include_clobbered_blocks=False):
-        raise NotImplementedError
-
-
 class EmptyImage(Image):
     """A zero-length image."""
     blocksize = 4096
@@ -109,85 +105,6 @@ class EmptyImage(Image):
 
     def ReadRangeSet(self, ranges):
         return ()
-
-    def TotalSha1(self, include_clobbered_blocks=False):
-        # EmptyImage always carries empty clobbered_blocks, so
-        # include_clobbered_blocks can be ignored.
-        assert self.clobbered_blocks.size() == 0
-        return sha1().hexdigest()
-
-
-class DataImage(Image):
-    """An image wrapped around a single string of data."""
-
-    def __init__(self, data, trim=False, pad=False):
-        self.data = data
-        self.blocksize = 4096
-
-        assert not (trim and pad)
-
-        partial = len(self.data) % self.blocksize
-        padded = False
-        if partial > 0:
-            if trim:
-                self.data = self.data[:-partial]
-            elif pad:
-                self.data += '\0' * (self.blocksize - partial)
-                padded = True
-            else:
-                raise ValueError(("data for DataImage must be multiple of %d bytes "
-                                  "unless trim or pad is specified") %
-                                 (self.blocksize,))
-
-        assert len(self.data) % self.blocksize == 0
-
-        self.total_blocks = len(self.data) / self.blocksize
-        self.care_map = RangeSet(data=(0, self.total_blocks))
-        # When the last block is padded, we always write the whole block even for
-        # incremental OTAs. Because otherwise the last block may get skipped if
-        # unchanged for an incremental, but would fail the post-install
-        # verification if it has non-zero contents in the padding bytes.
-        # Bug: 23828506
-        if padded:
-            clobbered_blocks = [self.total_blocks - 1, self.total_blocks]
-        else:
-            clobbered_blocks = []
-        self.clobbered_blocks = clobbered_blocks
-        self.extended = RangeSet()
-
-        zero_blocks = []
-        nonzero_blocks = []
-        reference = '\0' * self.blocksize
-
-        for i in range(self.total_blocks - 1 if padded else self.total_blocks):
-            d = self.data[i * self.blocksize: (i + 1) * self.blocksize]
-            if d == reference:
-                zero_blocks.append(i)
-                zero_blocks.append(i + 1)
-            else:
-                nonzero_blocks.append(i)
-                nonzero_blocks.append(i + 1)
-
-        assert zero_blocks or nonzero_blocks or clobbered_blocks
-
-        self.file_map = dict()
-        if zero_blocks:
-            self.file_map["__ZERO"] = RangeSet(data=zero_blocks)
-        if nonzero_blocks:
-            self.file_map["__NONZERO"] = RangeSet(data=nonzero_blocks)
-        if clobbered_blocks:
-            self.file_map["__COPY"] = RangeSet(data=clobbered_blocks)
-
-    def ReadRangeSet(self, ranges):
-        return [self.data[s * self.blocksize:e * self.blocksize] for (s, e) in ranges]
-
-    def TotalSha1(self, include_clobbered_blocks=False):
-        if not include_clobbered_blocks:
-            ranges = self.care_map.subtract(self.clobbered_blocks)
-            return sha1(self.ReadRangeSet(ranges)).hexdigest()
-        else:
-            return sha1(self.data).hexdigest()
-
 
 class Transfer(object):
     def __init__(self, tgt_name, src_name, tgt_ranges, src_ranges, style, by_id):
@@ -273,11 +190,6 @@ class HeapItem(object):
 #      Implementations are free to break up the data into list/tuple
 #      elements in any way that is convenient.
 #
-#    TotalSha1(): a function that returns (as a hex string) the SHA-1
-#      hash of all the data in the image (ie, all the blocks in the
-#      care_map minus clobbered_blocks, or including the clobbered
-#      blocks if include_clobbered_blocks is True).
-#
 # When creating a BlockImageDiff, the src image may be None, in which
 # case the list of transfers produced will never read from the
 # original image.
@@ -314,10 +226,6 @@ class BlockImageDiff(object):
         # the care map.
         self.AssertPartition(src.care_map, src.file_map.values())
         self.AssertPartition(tgt.care_map, tgt.file_map.values())
-
-    @property
-    def max_stashed_size(self):
-        return self._max_stashed_size
 
     def Compute(self, prefix):
         # When looking for a source file to use as the diff input for a
