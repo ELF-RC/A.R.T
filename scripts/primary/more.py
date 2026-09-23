@@ -1,4 +1,4 @@
-"""MORE - 更多功能入口"""
+"""MORE - Additional tools menu"""
 
 import os
 
@@ -10,6 +10,7 @@ BOLD = '\x1b[1m'
 CLOSE = '\x1b[0m'
 
 
+# Secondary tools menu: payload and AVB operations.
 def main():
     while True:
         os.system("clear")

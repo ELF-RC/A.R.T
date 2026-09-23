@@ -42,6 +42,7 @@ _RESERVED_WORKSPACE_NAMES = frozenset({"config", "INPUT", "OUT", "WORKSPACE"})
 # ═══════════════════════════════════════════════════════════════════════
 
 @dataclass(frozen=True)
+# Canonical project directory layout and path-safety policy.
 class ProjectLayout:
     """The only supported on-disk layout for an A.R.T project.
 
@@ -219,6 +220,7 @@ class ProjectLayout:
 #  Workspace helpers (from workspace.py)
 # ═══════════════════════════════════════════════════════════════════════
 
+# Partition naming and workspace path helpers.
 def partition_name(image_path):
     """Return the validated partition name represented by an image path."""
     name = os.path.basename(image_path)
@@ -238,6 +240,7 @@ def workspace_temp(category):
     return str(V.layout.create_stage_dir(category)) + os.sep
 
 
+# Metadata filename conventions.
 def partition_metadata_names(partition):
     return (
         f'{partition}_contexts.txt',
@@ -255,6 +258,7 @@ def metadata_path(config_dir, partition, suffix):
     return Path(config_dir) / f'{partition}{suffix}'
 
 
+# Safe extraction staging and metadata commit.
 def create_partition_stage(partition, category, create_partition=True):
     """Prepare WORKSPACE/<partition>/ and WORKSPACE/config/ for direct extraction."""
     partition = ProjectLayout.validate_component(partition, '分区')
@@ -282,6 +286,7 @@ def _stage_work_source(source, category):
     return str(Path(source).resolve())
 
 
+# Validate required extraction metadata before commit.
 def _commit_extracted_partition(partition, stage_root, required_metadata, preserve_existing_metadata=False):
     """Direct extraction mode: files are already in WORKSPACE, just verify metadata."""
     config_dir = Path(V.config)
@@ -298,6 +303,7 @@ def _commit_extracted_partition(partition, stage_root, required_metadata, preser
     return True
 
 
+# Read previous image sizing metadata for repacking.
 def load_image_json(dumpinfo, source_dir):
     with open(dumpinfo, "a+", encoding="utf-8") as f:
         f.seek(0)
@@ -321,6 +327,7 @@ def load_image_json(dumpinfo, source_dir):
     return fsize, dsize, inodes, block_size, blocks, per_group, mount_point
 
 
+# Bind the selected project layout to workflow paths.
 def envelop_project():
     """Initialize project layout from V.project."""
     project_name = os.path.basename(os.path.normpath(V.project))

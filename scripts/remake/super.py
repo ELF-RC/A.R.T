@@ -1,4 +1,4 @@
-"""Super image repack — 打包 super.img 动态分区。"""
+"""Super image repacker for dynamic partitions."""
 
 import os
 
@@ -9,6 +9,7 @@ from scripts.primary.utils import (
 from scripts.primary.workspace import LayoutError
 
 
+# Build lpmake arguments and emit super.img.
 def repack_super(selected_parts, super_type, super_sparse):
     """Synthesize super.img from selected partition images.
 

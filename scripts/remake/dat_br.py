@@ -1,4 +1,4 @@
-"""DAT/DAT.BR repack — 将分区镜像转换为 block package。"""
+"""DAT/DAT.BR repacker for block packages."""
 
 import os
 import tempfile
@@ -45,12 +45,14 @@ from hashlib import sha1
 __all__ = ["EmptyImage", "BlockImageDiff"]
 
 
+# DAT/DAT.BR diff settings and patch primitives.
 class Settings(object):
     # Stash size cannot exceed cache_size * threshold.
     cache_size = None
     stash_threshold = 0.8
 
 
+# Create a binary or imgdiff patch for one block range.
 def compute_patch(src, tgt, imgdiff=False):
     srcfd, srcfile = mkstemp(prefix="src-")
     tgtfd, tgtfile = mkstemp(prefix="tgt-")
@@ -90,6 +92,7 @@ def compute_patch(src, tgt, imgdiff=False):
             pass
 
 
+# Image abstractions used by the transfer planner.
 class Image(object):
     def ReadRangeSet(self, ranges):
         raise NotImplementedError
@@ -106,6 +109,7 @@ class EmptyImage(Image):
     def ReadRangeSet(self, ranges):
         return ()
 
+# Transfer graph nodes and ordering constraints.
 class Transfer(object):
     def __init__(self, tgt_name, src_name, tgt_ranges, src_ranges, style, by_id):
         self.tgt_name = tgt_name
@@ -194,6 +198,7 @@ class HeapItem(object):
 # case the list of transfers produced will never read from the
 # original image.
 
+# Block-level diff computation and transfer-list generation.
 class BlockImageDiff(object):
     def __init__(self, tgt, src=None, version=4, threads=None,
                  disable_imgdiff=False):
@@ -1161,6 +1166,7 @@ class BlockImageDiff(object):
         assert so_far == total
 
 
+# Convert one image into new.dat and transfer.list.
 def _image_to_dat(input_image, outdir='.', version=None, prefix='system'):
     """Convert an image into Android block OTA package files."""
     version_text = '1.7'
@@ -1179,6 +1185,7 @@ def _image_to_dat(input_image, outdir='.', version=None, prefix='system'):
     print('Done! Output files: %s' % os.path.dirname(output_prefix))
 
 
+# Public DAT/DAT.BR repack entry point.
 def recompress_dat_br(label, distance, flag):
     """Generate a .new.dat or .new.dat.br package from an image."""
     if flag <= 9:

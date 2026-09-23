@@ -1,4 +1,5 @@
 # Copyright (C) 2014 The Android Open Source Project
+"""Sparse-image reader used by block OTA generation."""
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,6 +21,7 @@ import struct
 from scripts.primary.utils import RangeSet
 
 
+# Sparse-image reader used by block OTA generation.
 class SparseImage:
     """Wraps a sparse image file into an image object.
 
@@ -31,6 +33,7 @@ class SparseImage:
   the form of a string like "0" or "0 1-5 8".
   """
 
+# Parse the sparse header, chunks, care map, and optional file map.
     def __init__(self, simg_fn, file_map_fn=None, clobbered_blocks=None,
                  mode="rb", build_map=True):
         self.simg_f = f = open(simg_fn, mode)
@@ -130,9 +133,11 @@ class SparseImage:
         else:
             self.file_map = {"__DATA": self.care_map}
 
+# Read logical block ranges as byte fragments.
     def ReadRangeSet(self, ranges):
         return [d for d in self._GetRangeData(ranges)]
 
+# Stream raw and fill-chunk data for requested ranges.
     def _GetRangeData(self, ranges):
         """Generator that produces all the image data in 'ranges'.  The
     number of individual pieces returned is arbitrary (and in
@@ -172,6 +177,7 @@ class SparseImage:
                     yield fill_data * (this_read * (self.blocksize >> 2))
                 to_read -= this_read
 
+# Build file, zero, and nonzero block groups for OTA planning.
     def LoadFileBlockMap(self, fn, clobbered_blocks):
         remaining = self.care_map
         self.file_map = out = {}

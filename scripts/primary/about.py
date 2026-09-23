@@ -1,4 +1,4 @@
-"""ABOUT - 工具说明与作者信息"""
+"""ABOUT - Project information and acknowledgements"""
 
 import os
 
@@ -8,6 +8,7 @@ YELLOW = '\x1b[1;33m'
 CLOSE = '\x1b[0m'
 
 
+# Display project links, authors, licenses, and acknowledgements.
 def show():
     os.system("clear")
     print(f"""

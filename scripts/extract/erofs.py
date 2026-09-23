@@ -9,6 +9,7 @@ from pathlib import Path
 from scripts.primary.utils import V, call, display
 
 
+# Validate partition paths and normalize extractor metadata.
 class LayoutError(RuntimeError):
     """Raised when EROFS output layout or metadata is invalid."""
 
@@ -35,6 +36,7 @@ def _metadata_path(config_dir: Path, partition: str, suffix: str) -> Path:
     return config_dir / f'{partition}{suffix}'
 
 
+# Rename EROFS metadata into project naming.
 def _normalize_erofs_metadata(partition: str, config_dir: Path) -> bool:
     """Rename extractor metadata to A.R.T's canonical names."""
     config_dir = config_dir.resolve()
@@ -66,6 +68,7 @@ def _commit_extracted_partition(partition: str, config_dir: Path, required: set[
     return True
 
 
+# Public EROFS extraction entry point.
 def extract_erofs(working_source, partition, destination):
     """Extract EROFS into the requested partition directory."""
     partition = _validate_partition(partition)

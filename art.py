@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+"""A.R.T command-line application entry point."""
 import multiprocessing
 import sys
 

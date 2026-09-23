@@ -34,6 +34,7 @@ class MagicError(Ext4Error):
 
 # ----------------------------- LOW LEVEL ------------------------------
 
+# Binary EXT4 structures and low-level block readers.
 class ext4_struct(ctypes.LittleEndianStructure):
     def __getattr__(self, name):
         try:
@@ -419,6 +420,7 @@ class ext4_xattr_ibody_header(ext4_struct):
     ]
 
 
+# EXT4 filesystem model and traversal helpers.
 class InodeType:
     UNKNOWN = 0x0  # Unknown file type
     FILE = 0x1  # Regular file
@@ -465,6 +467,7 @@ class MappingEntry:
             idx += 1
 
 
+# Volume, inode, extent, xattr, and file readers.
 class Volume:
     ROOT_INODE = 2
 
@@ -946,6 +949,7 @@ def is_valid_ext4_directory_entry(entry_name, entry_inode_idx):
     )
 
 
+# High-level EXT4 extraction and metadata generation facade.
 class ULTRAMAN(object):
 
     def __init__(self):
@@ -1275,6 +1279,7 @@ _SAFE_PARTITION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 _RESERVED_PARTITIONS = {".", "..", "config", "INPUT", "OUT", "WORKSPACE"}
 
 
+# Output validation and metadata verification.
 def _validate_partition(partition):
     if not isinstance(partition, str) or not _SAFE_PARTITION.fullmatch(partition):
         raise ImageExtractionError(f"非法分区名称: {partition!r}")
@@ -1321,6 +1326,7 @@ def _verify_metadata(partition, config_dir):
         )
 
 
+# Public EXT4 extraction entry point.
 def extract_ext4(working_source, partition, destination):
     """Extract an EXT4 image into the supplied destination directory.
 

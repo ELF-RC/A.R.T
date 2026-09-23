@@ -12,6 +12,7 @@ from pathlib import Path
 from scripts.primary.utils import V, gettype
 
 
+# Validate, stage, and safely unpack WIN content.
 class LayoutError(RuntimeError):
     """Raised when a WIN archive or its output layout is invalid."""
 
@@ -51,6 +52,7 @@ def _create_partition_stage(partition: str) -> Path:
     return partition_dir
 
 
+# Restrict TAR extraction to regular files inside the stage.
 def _safe_extract_tar(archive: tarfile.TarFile, destination: Path) -> None:
     """Extract only regular files/directories within destination."""
     destination = destination.resolve()
@@ -74,6 +76,7 @@ def _win_partition(source: str) -> str:
     return _validate_component(os.path.basename(source).split('.', 1)[0])
 
 
+# Merge WIN fragments and dispatch image or TAR content.
 def decompress_win(infile_list):
     """Extract image-form or TAR-form WIN archives into WORKSPACE."""
     groups = {}

@@ -25,6 +25,7 @@ MOD_DIR = PWD_DIR + "local/sub/"
 _RESERVED_MENU_IDS = {44, 66, 88}
 
 
+# Project and plugin listing helpers.
 def lists_project(dTitle, sPath, flag):
     i = 0
     V.dict0 = {i: dTitle}
@@ -64,6 +65,7 @@ def lists_project(dTitle, sPath, flag):
         print("\x1b[0;35m  [33] - 安装         [44] - 删除         [88] - 退出  \x1b[0m\n")
 
 
+# Project creation and layout initialization.
 def creat_project():
     os.system("clear")
     print("\x1b[1;31m> 新建工程:\x1b[0m\n")
@@ -94,6 +96,7 @@ def quiet():
     V.JM = input('> 是否开启静默 [0/1]: ') == '1'
 
 
+# Project selection and outer menu loop.
 def menu_once():
     load_setup_json()
     while True:
@@ -142,6 +145,7 @@ def menu_once():
             input(f"> Number \x1b[0;33m{choice}\x1b[0m enter error !")
 
 
+# Interactive super image input selection.
 def menu_super():
     """Interactive super image repack."""
     os.system("clear")
@@ -202,6 +206,7 @@ def menu_super():
         repack_super(selected, super_type, super_sparse)
 
 
+# Plugin discovery, installation, and execution.
 def menu_modules():
     while True:
         os.system("clear")
@@ -240,6 +245,7 @@ def menu_modules():
             print(f"> Number \x1b[0;33m{choice}\x1b[0m enter error !")
 
 
+# Fixed menu actions and main operation dispatcher.
 menu_actions = {
     66: sys.exit,
     8: menu_modules,
@@ -247,6 +253,7 @@ menu_actions = {
 }
 
 
+# Per-project extraction, repacking, and utility menu.
 def menu_main():
     """Run the project menu iteratively."""
     V.JM = True

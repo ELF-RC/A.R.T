@@ -1,4 +1,8 @@
-"""Shared utility functions and runtime tool management."""
+"""Shared utility functions grouped by responsibility.
+
+Sections are intentionally kept in one stable common helper module for the
+extract, remake, and primary packages.
+"""
 
 import os
 from collections import deque
@@ -13,6 +17,9 @@ from heapq import merge
 from itertools import cycle
 from pathlib import Path
 
+# ---------------------------------------------------------------------------
+# Runtime state and bundled external-tool paths
+# ---------------------------------------------------------------------------
 PWD_DIR = os.getcwd() + os.sep
 BIN_PATH = PWD_DIR + "art-res/bin/"
 
@@ -22,6 +29,7 @@ RED, WHITE, CYAN, YELLOW, MAGENTA, GREEN, BOLD, CLOSE = [
 ]
 
 
+# Global mutable state shared by the interactive workflow.
 class GlobalValue(object):
     JM = False
 
@@ -42,6 +50,7 @@ class GlobalValue(object):
 V = GlobalValue()
 
 
+# Runtime setup helpers.
 def change_permissions_recursive(path, mode):
     for root, dirs, files in os.walk(path):
         for d in dirs:
@@ -67,6 +76,7 @@ def init_bin_path():
             sys.exit(f"[x] Not found: {prog}\n[i] Please install {prog} \n   Or add <{prog}> to {BIN_PATH}")
 
 
+# Execute one bundled tool while preserving the historical call API.
 def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None):
     """Run a command with MIO-compatible argv handling and no implicit shell."""
     del sp
@@ -102,7 +112,10 @@ def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None):
 
 
 
-# Android sparse image format constants.
+# ---------------------------------------------------------------------------
+# Android sparse-image conversion
+# ---------------------------------------------------------------------------
+# Format constants are shared by extraction and repacking.
 SPARSE_HEADER_MAGIC = 0xED26FF3A
 SPARSE_HEADER_SIZE = 28
 SPARSE_CHUNK_HEADER_SIZE = 12
@@ -133,6 +146,7 @@ def _sparse_temp_file(destination):
         dir=parent,
     )
 
+# Expand sparse chunks into a raw image.
 def sparse_to_raw(source, destination=None):
     """Expand an Android sparse image to a raw image and return its path.
 
@@ -250,6 +264,7 @@ def sparse_to_raw(source, destination=None):
         raise
     return destination
 
+# Encode raw blocks as DONT_CARE, FILL, or RAW sparse chunks.
 def raw_to_sparse(source, destination=None, block_size=4096):
     """Convert a raw image to Android sparse format and return its path.
 
@@ -373,6 +388,9 @@ def raw_to_sparse(source, destination=None, block_size=4096):
         raise
     return destination
 
+# ---------------------------------------------------------------------------
+# User-facing output and ordinary filesystem helpers
+# ---------------------------------------------------------------------------
 class CoastTime:
     def __init__(self):
         self.t = 0
@@ -423,6 +441,7 @@ def rmdire(path):
             print("删除成功！")
 
 
+# Validate archive members before extracting into a project path.
 def safe_extract_zip(archive, destination):
     """Extract a ZIP only after rejecting members that escape its destination."""
     import stat
@@ -443,7 +462,8 @@ def safe_extract_zip(archive, destination):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  File type detection (from gettype.py)
+#  File-type detection and executable lookup
+# ---------------------------------------------------------------------------
 # ═══════════════════════════════════════════════════════════════════════
 
 _FILE_SIGNATURES = (
@@ -497,13 +517,16 @@ def findfile(file, dir_) -> str:
         if file in files:
             return root + os.sep + file
 
-# Initialize the shared runtime tool path for all consumers.
+# Initialize the shared runtime tool path before format modules use it.
 init_bin_path()
 
 
 
+# ---------------------------------------------------------------------------
+# Block-range operations used by sparse images and block OTA generation
+# ---------------------------------------------------------------------------
 # Copyright (C) 2014 The Android Open Source Project
-# RangeSet is used by sparse-image parsing and block OTA generation.
+# Represent non-overlapping half-open integer ranges efficiently.
 class RangeSet(object):
     """A RangeSet represents a set of non-overlapping ranges on the
   integers (ie, a set of integers, but efficient when the set contains
@@ -787,7 +810,10 @@ class RangeSet(object):
         return RangeSet(data=out)
 
 
-# Filesystem metadata helpers used during image repacking.
+# ---------------------------------------------------------------------------
+# fsconfig scanning and metadata completion for image repacking
+# ---------------------------------------------------------------------------
+# Read the existing fsconfig into a path -> metadata mapping.
 def scanfs(file: str) -> dict:
     """
     Scan Origin File , Return A dict
@@ -811,6 +837,7 @@ def scanfs(file: str) -> dict:
     return filesystem_config
 
 
+# Enumerate directories, files, and required root entries.
 def scan_dir(folder: str) -> list:
     """
     Scan Folder , Return A path One By One
@@ -838,7 +865,8 @@ def islink(file) -> str:
     return ''
 
 
-def fs_patch(fs_file, dir_path) -> tuple:  # 接收两个字典对比
+# Add default metadata for paths missing from the source fsconfig.
+def fs_patch(fs_file, dir_path) -> tuple:  # Compare the two metadata dictionaries.
     """
     Patch fs_file, Add Missing File Config
     :param fs_file:
@@ -906,6 +934,7 @@ def fs_patch(fs_file, dir_path) -> tuple:  # 接收两个字典对比
     return new_fs, new_add
 
 
+# Public fsconfig patching entry point used by EXT4/EROFS repacking.
 def patch_fsconfig(dir_path: str, fs_config: str):
     """
     List The Dir_Path and Add Missing file config

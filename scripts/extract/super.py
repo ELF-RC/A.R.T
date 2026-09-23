@@ -1,4 +1,4 @@
-"""Super image extraction — 解包 super.img 动态分区及选择性提取逻辑分区。"""
+"""Super image extraction, logical partitions, and selective extraction."""
 
 import os
 import shutil
@@ -8,6 +8,7 @@ from scripts.primary.utils import V, display, is_sparse_image, sparse_to_raw
 from scripts.primary.workspace import workspace_partition
 
 
+# Normalize logical-partition image names before recursion.
 def _super_images_to_process(super_dir):
     """Normalize A/B logical partition images and return images to process."""
     images = sorted(Path(super_dir).glob('*.img'))
@@ -262,6 +263,7 @@ class ShowJsonInfo(json.JSONEncoder):
         return super().encode(result)
 
 
+# LP metadata structures and serialization helpers.
 class LpMetadataBase:
     _fmt = None
 
@@ -670,6 +672,7 @@ class Metadata:
         return template.substitute(partitions=partitions, layouts=layouts, blocks=blocks, groups=groups, **data)
 
 
+# Logical partition extent extraction engine.
 class LpUnpackError(Exception):
     """Raised any error unpacking"""
 
@@ -915,6 +918,7 @@ class LpUnpack:
             self._fd.close()
 
 
+# Programmatic super unpack facade.
 def unpack(file: str, out: str, parts: list = None):
     namespace = argparse.Namespace(SUPER_IMAGE=file, OUTPUT_DIR=out, SHOW_INFO=False, NAME=parts)
     if not os.path.exists(namespace.SUPER_IMAGE):
@@ -932,7 +936,7 @@ CLOSE = '\x1b[0m'
 
 
 # ---------------------------------------------------------------------------
-# 路径获取：优先使用 V（来自统一工具/工程状态），否则回退到 cwd 扫描
+# Resolve paths from V (shared runtime/project state), then fall back to scanning cwd.
 # ---------------------------------------------------------------------------
 def _get_input_dir():
     if V and getattr(V, 'input', None):
@@ -969,8 +973,9 @@ def _human_size(b):
 
 
 # ---------------------------------------------------------------------------
-# 核心：读取 super 元数据，返回分区列表 [(name, group, size_bytes), ...]
+# Core: read super metadata and return [(name, group, size_bytes), ...].
 # ---------------------------------------------------------------------------
+# Read metadata for the selective extraction screen.
 def _list_partitions(super_img_path):
     """Parse super metadata and return (sorted_partition_info, effective_img_path)."""
     job = LpUnpack(SUPER_IMAGE=super_img_path, SHOW_INFO=False)
@@ -989,12 +994,12 @@ def _list_partitions(super_img_path):
             group = metadata.groups[p.group_index].name
         result.append((p.name, group, size))
     job._fd.close()
-    result.sort(key=lambda x: (-x[2], x[0]))  # 大->小，同大小按名字
+    result.sort(key=lambda x: (-x[2], x[0]))  # Sort by size descending, then by name.
     return result, effective_path
 
 
 # ---------------------------------------------------------------------------
-# UI：显示分区列表，让用户勾选
+# UI: display the partition list and let the user select entries.
 # ---------------------------------------------------------------------------
 def _show_partitions(partitions):
     """Print partition list, return indices of selected partitions."""
@@ -1034,8 +1039,9 @@ def _show_partitions(partitions):
 
 
 # ---------------------------------------------------------------------------
-# 核心：抽取选中的分区
+# Core: extract the selected partitions.
 # ---------------------------------------------------------------------------
+# Extract selected logical partitions.
 def _extract_selected(super_img_path, out_dir, partitions, selected_indices):
     """Extract selected logical partitions with the embedded LP unpacker."""
     if not selected_indices:
@@ -1048,7 +1054,7 @@ def _extract_selected(super_img_path, out_dir, partitions, selected_indices):
     print()
 
     try:
-        # 使用本文件内置的 LP 解包器，传入 NAME 过滤，SHOW_INFO=False，指定 OUTPUT_DIR
+        # Use the embedded LP unpacker with NAME filtering, SHOW_INFO=False, and OUTPUT_DIR.
         os.makedirs(out_dir, exist_ok=True)
         job = LpUnpack(
             SUPER_IMAGE=super_img_path,
@@ -1063,8 +1069,9 @@ def _extract_selected(super_img_path, out_dir, partitions, selected_indices):
 
 
 # ---------------------------------------------------------------------------
-# 入口
+# Entry point.
 # ---------------------------------------------------------------------------
+# Selective super extraction menu entry point.
 def super_selective_main():
     os.system("clear")
     input_dir = _get_input_dir()

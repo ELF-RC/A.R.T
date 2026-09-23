@@ -1,4 +1,4 @@
-"""DAT / DAT.BR extraction — 解包 new.dat / new.dat.br 刷机包。"""
+"""DAT / DAT.BR extraction for new.dat and new.dat.br packages."""
 
 import os
 import shutil
@@ -22,10 +22,12 @@ from pathlib import Path
 BLOCK_SIZE = 4096
 
 
+# Transfer-list parsing and DAT-to-image reconstruction.
 class SdatError(RuntimeError):
     """Raised when a DAT bundle is incomplete or requires unsupported OTA state."""
 
 
+# Parse inclusive block ranges from transfer.list syntax.
 def _rangeset(source):
     try:
         values = [int(item) for item in source.strip().split(',')]
@@ -88,6 +90,7 @@ def _write_zeroes(output, count):
         remaining -= len(block)
 
 
+# Reconstruct one raw image from transfer commands.
 def _sdat2img_main(transfer_list_file, new_data_file, output_image_file):
     """Build one raw image and remove an incomplete output on failure."""
     version, new_blocks, commands = _parse_transfer_list(transfer_list_file)
@@ -140,6 +143,7 @@ def _sdat2img_main(transfer_list_file, new_data_file, output_image_file):
 
 
 
+# Locate split DAT/DAT.BR fragments.
 def _numbered_fragments(source):
     """Return contiguous .1/.2/... fragments or reject an incomplete bundle."""
     source_path = Path(source)
@@ -182,6 +186,7 @@ def _combine_fragments(source):
     return str(dest)
 
 
+# Decode one plain .new.dat partition.
 def decompress_dat(transfer, source, distance=None, keep=0):
     """Convert DAT directly: read transfer.list + dat from INPUT, extract to partition."""
     from scripts.extract.image import decompress_img
@@ -216,6 +221,7 @@ def decompress_dat(transfer, source, distance=None, keep=0):
                     pass
 
 
+# Decode Brotli-compressed DAT fragments.
 def decompress_bro(transfer, source, distance=None, keep=0):
     """Decompress BR directly from INPUT, then run DAT pipeline."""
     del distance, keep
@@ -279,6 +285,7 @@ def _decompress_single_partition(item, flag):
         return {"partition": name, "success": False, "error": str(error)}
 
 
+# Batch entry point used by the image dispatcher.
 def decompress_dat_batch(infile, flag):
     """Batch decompress dat.br or dat files with interactive selection and parallel execution."""
     items = _list_dat_partitions(infile)

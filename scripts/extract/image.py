@@ -23,6 +23,7 @@ from scripts.primary.workspace import (
 )
 
 
+# Single-image format dispatcher.
 def decompress_img(source, distance=None, keep=1):
     """Extract one image directly into WORKSPACE/<partition>/.
 
@@ -95,6 +96,7 @@ def decompress_img(source, distance=None, keep=1):
         echo('[red][Failed][/]')
 
 
+# Batch dispatcher for DAT.BR, DAT, and IMG menu options.
 def decompress(infile, flag=4):
     """Batch extraction entry point for dat.br / dat / img files."""
     if flag in (2, 3):
@@ -120,6 +122,7 @@ def decompress(infile, flag=4):
             print(f'> 跳过 {os.path.basename(part)}: {error}')
 
 
+# ROM ZIP import and plugin installation workflow.
 def extract_zrom(rom):
     """Extract a ROM zip or install a plugin."""
     import zipfile

@@ -18,6 +18,7 @@ from scripts.primary.workspace import (
 )
 
 
+# Payload protobuf parsing and operation writing.
 class PayloadError(RuntimeError):
     """Raised when a payload cannot be parsed or extracted safely."""
 
@@ -51,6 +52,7 @@ _ZERO = 6
 _REPLACE_XZ = 8
 
 
+# Manifest wire-format decoding.
 def _read_varint(data: bytes, offset: int) -> tuple[int, int]:
     value = 0
     shift = 0
@@ -192,6 +194,7 @@ def _validate_partition(name: str) -> str:
     return name
 
 
+# Bounded compressed-data readers and extent writers.
 class _LimitedReader:
     def __init__(self, stream, length: int, chunk_size: int):
         self.stream = stream
@@ -259,6 +262,7 @@ class _ExtentWriter:
             )
 
 
+# Materialize payload partitions from install operations.
 class _PayloadDumper:
     def __init__(self, payload_path, output_dir, images=(), buffer_size=1024 * 1024):
         self.payload_path = str(payload_path)
@@ -379,6 +383,7 @@ class _PayloadDumper:
         writer.finish()
 
 
+# Public payload metadata query helper.
 def info(payload_file):
     """Return payload partition names and sizes for the interactive selector."""
     _, _, partitions = _read_payload_header(str(payload_file))
@@ -412,6 +417,7 @@ def _runtime_path(name, fallback):
     return str(value)
 
 
+# Optional interactive dispatch of extracted payload images.
 def _decompress_payload_images(payload, payload_dir, mode):
     """Extract payload partitions, then optionally dispatch each image."""
     payload_partitions = info(payload)
@@ -471,6 +477,7 @@ def _decompress_payload_images(payload, payload_dir, mode):
             os.remove(image)
 
 
+# Public payload.bin extraction entry point.
 def decompress_bin(infile, outdir=None, flag='1'):
     """Extract payload.bin without importing another Payload implementation."""
     os.system('clear')

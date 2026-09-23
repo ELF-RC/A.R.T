@@ -28,6 +28,7 @@ _SETUP_DEFAULTS = {
 }
 
 
+# Defaults and validation.
 def set_default_env_setup():
     """Merge defaults into existing manifest, preserving user values."""
     for key, value in _SETUP_DEFAULTS.items():
@@ -49,6 +50,7 @@ def validate_default_env_setup(setup_manifest):
             f'Invalid ["UNPACK_SPLIT_DAT" : "{setup_manifest["UNPACK_SPLIT_DAT"]}"] - must be one of <1-999>')
 
 
+# Load, normalize, validate, and persist settings.
 def load_setup_json():
     with open(SETUP_JSON, "r", encoding="utf-8") as manifest_file:
         V.SETUP_MANIFEST = json.load(manifest_file)
@@ -58,6 +60,7 @@ def load_setup_json():
         json.dump(V.SETUP_MANIFEST, f, indent=4)
 
 
+# Interactive settings editor.
 def env_setup():
     """Interactive settings editor."""
     categories = [
@@ -114,6 +117,7 @@ def env_setup():
             json.dump(data, ss, ensure_ascii=False, indent=4)
 
 
+# First-run settings initialization.
 def check_permissions():
     if not os.path.isfile(SETUP_JSON):
         if not os.path.isdir(os.path.dirname(SETUP_JSON)):

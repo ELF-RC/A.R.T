@@ -1,4 +1,4 @@
-"""Boot image unpack — 解包 boot/vendor_boot 镜像。"""
+"""Boot image unpacker for boot/vendor_boot images."""
 
 import os
 import shutil
@@ -8,6 +8,7 @@ from scripts.primary.utils import V, display, call, rmdire
 from scripts.primary.utils import gettype
 
 
+# Low-level magiskboot unpack and ramdisk extraction.
 def unpackboot(file, distance):
     """Unpack a boot image into a staging directory and report success."""
     original_dir = os.getcwd()
@@ -58,6 +59,7 @@ def unpackboot(file, distance):
         os.chdir(original_dir)
 
 
+# Public boot/vendor_boot extraction entry point.
 def boot_unpack(source, distance):
     """Entry point for boot unpack."""
     if not os.path.isdir(distance):

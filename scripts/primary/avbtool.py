@@ -1,4 +1,4 @@
-"""AVBTOOL - 镜像签名与VBMeta工具"""
+"""AVBTOOL - Image signing and VBMeta operations"""
 
 import os
 import shutil
@@ -16,6 +16,7 @@ CLOSE = '\x1b[0m'
 AVBTOOL = os.path.join(BIN_PATH, "avbtool")
 
 
+# AVB command execution and signing-key path helpers.
 def _run(args):
     """Run avbtool, print output, return True on success."""
     result = subprocess.run(
@@ -60,8 +61,9 @@ def _select_file(prompt="选择文件"):
         print(f'  {RED}> 文件不存在: {path}{CLOSE}')
 
 
+# Interactive AVB and VBMeta operations.
 def cmd_info_image():
-    """[01] 查看镜像信息"""
+    """[01] Show image information"""
     img = _select_file('选择要查看的镜像')
     if not img:
         input('> 按回车继续')
@@ -71,7 +73,7 @@ def cmd_info_image():
 
 
 def _trim_trailing_zeros(img):
-    """截掉镜像尾部全零数据，返回截断后大小；若无零数据则返回原大小。"""
+    """Trim trailing zero data and return the resulting size; keep the original size when no zero data exists."""
     size = os.path.getsize(img)
     with open(img, 'rb') as f:
         chunk_size = 65536
@@ -100,7 +102,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         input('> 按回车继续')
         return
 
-    # 拷贝原文件为 x_signed.img，在副本上操作
+    # Copy the original to x_signed.img and operate on the copy.
     base, ext = os.path.splitext(img)
     out_img = f'{base}_signed{ext}'
     shutil.copy2(img, out_img)
@@ -118,18 +120,18 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
     else:
         img_size = orig_size
 
-    # 分区名：用户输入，留空则用文件名去掉.img
+    # Partition name: use the user input, or the filename without .img when empty.
     part_name = input('\n  分区名（留空用文件名）>> ').strip() or os.path.splitext(os.path.basename(img))[0]
 
     pass_path = _pass_file_path()
-    # partition_size：用户输入则直接用，否则自动计算
+    # partition_size: use the user value, or calculate it automatically.
     ps_input = input('  分区大小（字节），留空自动计算 >> ').strip()
     import math
     if ps_input:
         v = int(ps_input)
         aligned_ps = str(v) if v % 4096 == 0 else str((v + 4095) // 4096 * 4096)
     elif cmd_name == 'add_hashtree_footer':
-        # --calc_max_image_size 比例估算
+        # Estimate using the --calc_max_image_size ratio.
         trial_ps = (img_size + 64 * 1024 * 1024 + 4095) // 4096 * 4096
         r = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
@@ -153,7 +155,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
     else:
         aligned_ps = str((img_size + 69632 + 4095) // 4096 * 4096)
 
-    # 构建 args
+    # Build the argument list.
     args = [cmd_name, '--image', out_img, '--partition_name', part_name,
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
             '--partition_size', aligned_ps]
@@ -161,7 +163,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         args.append('--do_not_generate_fec')
     if pass_path:
         args.extend(['--pass-file', pass_path])
-    # rollback_index：hash footer 用户输入，hashtree 不传
+    # rollback_index: prompt for hash footer; omit it for hashtree footer.
     if cmd_name == 'add_hash_footer':
         rollback = input('  回滚索引（默认0）>> ').strip() or '0'
         args.extend(['--rollback_index', rollback])
@@ -177,7 +179,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
 
 
 def cmd_add_hash_footer():
-    """[02] 为 boot/recovery/dtbo 等小分区添加 hash footer"""
+    """[02] Add a hash footer to small partitions such as boot, recovery, and dtbo"""
     img = _select_file('选择要签名的镜像')
     if not img:
         input('> 按回车继续')
@@ -186,7 +188,7 @@ def cmd_add_hash_footer():
 
 
 def cmd_add_hashtree_footer():
-    """[03] 为 system/vendor 等大分区添加 hashtree footer"""
+    """[03] Add a hashtree footer to large partitions such as system and vendor"""
     img = _select_file('选择要签名的镜像')
     if not img:
         input('> 按回车继续')
@@ -195,15 +197,15 @@ def cmd_add_hashtree_footer():
 
 
 def cmd_verify_image():
-    """[04] 验证镜像签名"""
+    """[04] Verify the image signature"""
     img = _select_file('选择要验证的镜像')
     if not img:
         input('> 按回车继续')
         return
 
     print(f'\n  验证: {img}')
-    # 不传 --key，让 avbtool 从镜像内部提取公钥验证
-    # 避免新 avbtool 无法读取 avb_pkmd.bin（OpenSSL 3.x 兼容问题）
+    # Omit --key so avbtool extracts the public key from the image for verification.
+    # Avoid compatibility issues where newer avbtool cannot read avb_pkmd.bin with OpenSSL 3.x.
     result = subprocess.run(
         [AVBTOOL, 'verify_image', '--image', img],
         capture_output=True, text=True,
@@ -217,7 +219,7 @@ def cmd_verify_image():
 
 
 def cmd_erase_footer():
-    """[05] 去除镜像的AVB签名"""
+    """[05] Remove the image AVB footer"""
     img = _select_file('选择要去除签名的镜像')
     if not img:
         input('> 按回车继续')
@@ -237,6 +239,7 @@ def cmd_erase_footer():
     input('> 按回车继续')
 
 
+# AVB submenu dispatcher.
 def main():
     if not os.path.isfile(AVBTOOL):
         print(f'\n{RED}> 未找到 avbtool: {AVBTOOL}{CLOSE}')

@@ -1,4 +1,4 @@
-"""EXT4 image repack — 合成 EXT4 分区镜像。"""
+"""EXT4 image repacker."""
 
 import os
 import shutil
@@ -18,6 +18,7 @@ from scripts.primary.workspace import load_image_json
 from scripts.remake.dat_br import recompress_dat_br
 
 
+# Metadata normalization, image construction, and DAT hand-off.
 def walk_contexts(path):
     """Deduplicate a generated fs config or SELinux contexts file."""
     with open(path, "r", encoding="UTF-8") as source:
@@ -28,6 +29,7 @@ def walk_contexts(path):
         target.writelines(lines)
 
 
+# Prepare sizes, timestamps, metadata, and output paths.
 def _prepare(source, fsconfig, contexts, dumpinfo):
     label = os.path.basename(source)
     os.makedirs(V.out, exist_ok=True)
@@ -76,6 +78,7 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
     }
 
 
+# Build EXT4 and optionally convert to sparse/DAT.
 def _write_image(state, fsconfig, contexts, source, flag):
     label = state["label"]
     distance = state["distance"]
@@ -140,6 +143,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
     return True
 
 
+# Update dynamic-partition operation-list sizes.
 def _update_dynamic_partitions(label, distance):
     if not os.path.isfile(distance):
         print(f" {RED}打包失败{CLOSE}")
@@ -179,6 +183,7 @@ def _update_dynamic_partitions(label, distance):
     return True
 
 
+# Public EXT4 repack entry point.
 def recompress_ext4(source, fsconfig, contexts, dumpinfo, flag=8):
     """Recompress a partition directory into an EXT4 image or DAT package."""
     state = _prepare(source, fsconfig, contexts, dumpinfo)

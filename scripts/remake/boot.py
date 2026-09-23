@@ -1,4 +1,4 @@
-"""Boot image repack — 打包 boot/vendor_boot 镜像。"""
+"""Boot image repacker for boot/vendor_boot images."""
 
 import os
 import subprocess
@@ -7,6 +7,7 @@ from scripts.primary.utils import V, BIN_PATH, display, call
 from scripts.primary.utils import findfile
 
 
+# Low-level ramdisk packing and magiskboot repack.
 def dboot(infile, dist):
     or_dir = os.getcwd()
     if not os.path.exists(infile):
@@ -56,6 +57,7 @@ def dboot(infile, dist):
         print("Pack Successful...")
 
 
+# Public boot/vendor_boot repack entry point.
 def boot_repack(source, distance):
     """Entry point for boot repack."""
     if not os.path.isdir(distance):

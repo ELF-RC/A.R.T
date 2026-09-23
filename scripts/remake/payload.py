@@ -1,4 +1,4 @@
-"""PAYLOAD - 修补 payload.bin 卡刷包"""
+"""PAYLOAD - payload.bin OTA package patcher"""
 
 import os
 import subprocess
@@ -16,6 +16,7 @@ CLOSE = '\x1b[0m'
 KEY_FILES = ('avb.key', 'ota.key', 'avb_pkmd.bin', 'ota.crt')
 
 
+# OTA key management and avbroot command execution.
 def _run_avbroot(args, stdin_data=None):
     """Run avbroot with given args, optionally pipe stdin_data."""
     avbroot = os.path.join(BIN_PATH, "avbroot")
@@ -82,6 +83,7 @@ def _selected_zip():
     return name
 
 
+# Generate or remove OTA signing material.
 def _generate_keys():
     """Generate AVB + OTA signing keys."""
     d = _signkey_dir()
@@ -95,7 +97,7 @@ def _generate_keys():
     d.mkdir(parents=True, exist_ok=True)
     passphrase = input('\n  请输入密钥密码：').strip()
 
-    # 先写入 passphrase.txt，用 --pass-file 传密码避免交互
+    # Write passphrase.txt first and pass it with --pass-file to avoid interaction.
     pass_file = _write_pass_file(d, passphrase)
 
     print(f'\n  生成 AVB 密钥...')
@@ -168,6 +170,7 @@ def _list_zips():
     return sorted(f.name for f in d.iterdir() if f.suffix.lower() == '.zip' and f.is_file())
 
 
+# Select source OTA and replacement images.
 def _select_ota():
     """Select an OTA zip from stock-zip directory."""
     sf = _select_file()
@@ -237,6 +240,7 @@ def _get_ota_parts(zip_path):
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+# Build the avbroot OTA patch command.
 def _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names, disable_avb=False):
     """Build common avbroot ota patch command parts.
 
@@ -264,17 +268,17 @@ def _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names, disabl
     ]
     cmd.extend(pass_args)
 
-    # AVB 模式才需要 --key-avb 和对应的密码文件
+    # --key-avb and its passphrase file are needed only in AVB mode.
     if not disable_avb and avb_key.is_file():
         cmd.extend(['--key-avb', str(avb_key)])
         if pass_file.is_file():
             cmd.extend(['--pass-avb-file', str(pass_file)])
 
-    # 替换分区
+    # Replaced partitions.
     for part_name, img_name in replace_parts:
         cmd.extend(['--replace', part_name, str(_inputimg_dir() / img_name)])
 
-    # 新增分区（支持可选 SIZE）
+    # Added partitions (optional SIZE supported).
     for part_name, img_name, size in new_parts:
         cmd.extend(['--add-partition', part_name, str(_inputimg_dir() / img_name)])
         if size:
@@ -285,9 +289,10 @@ def _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names, disabl
     return cmd, output_name
 
 
+# Patch OTA without AVB signing.
 def _patch_ota_disable_avb():
     """Patch OTA with AVB disabled."""
-    # 检查前置条件
+    # Check prerequisites.
     zip_name = _selected_zip()
     if not zip_name:
         print(f'> {RED}请先选择 OTA 包{CLOSE}')
@@ -319,11 +324,11 @@ def _patch_ota_disable_avb():
         input('> 按回车继续')
         return
 
-    # 获取 OTA 中已有的分区
+    # Get partitions already present in the OTA.
     ota_parts = _get_ota_parts(zip_path)
     ota_parts_set = set(ota_parts)
 
-    # 分类：替换 vs 新增
+    # Classify partitions as replacements or additions.
     replace_parts = []
     new_parts = []
     for img_name in imgs:
@@ -333,7 +338,7 @@ def _patch_ota_disable_avb():
         else:
             new_parts.append((part_name, img_name, None))
 
-    # 询问新增分区大小和 super 模式
+    # Ask for new partition sizes and super mode.
     super_names = []
     if new_parts:
         print(f'\n  将要添加的新分区：{",".join(name for name, _, _ in new_parts)}')
@@ -371,9 +376,10 @@ def _patch_ota_disable_avb():
     input('> 按回车继续')
 
 
+# Patch OTA and apply AVB signing.
 def _patch_ota_with_avb():
     """Patch OTA with full AVB signing (normal signed OTA)."""
-    # 检查前置条件
+    # Check prerequisites.
     zip_name = _selected_zip()
     if not zip_name:
         print(f'> {RED}请先选择 OTA 包{CLOSE}')
@@ -406,11 +412,11 @@ def _patch_ota_with_avb():
         input('> 按回车继续')
         return
 
-    # 获取 OTA 中已有的分区
+    # Get partitions already present in the OTA.
     ota_parts = _get_ota_parts(zip_path)
     ota_parts_set = set(ota_parts)
 
-    # 分类：替换 vs 新增
+    # Classify partitions as replacements or additions.
     replace_parts = []
     new_parts = []
     for img_name in imgs:
@@ -420,7 +426,7 @@ def _patch_ota_with_avb():
         else:
             new_parts.append((part_name, img_name, None))
 
-    # 询问新增分区大小和 super 模式
+    # Ask for new partition sizes and super mode.
     super_names = []
     if new_parts:
         print(f'\n  将要添加的新分区：{",".join(name for name, _, _ in new_parts)}')
@@ -515,6 +521,7 @@ def _pick_verify_zip():
     return zips[idx - 1][1]
 
 
+# Verify a patched OTA package.
 def _verify_ota():
     """[05] Verify OTA zip signatures with avbroot ota verify."""
     zip_path = _pick_verify_zip()
@@ -556,6 +563,7 @@ def _verify_ota():
     input('> 按回车继续')
 
 
+# Show OTA keys, source ZIPs, and workspace status.
 def _show_status():
     """Print current status."""
     ks = _key_status()
@@ -580,6 +588,7 @@ def _ensure_ota_work_dirs():
         subdir.mkdir(parents=True, exist_ok=True)
 
 
+# Interactive payload/OTA maintenance menu.
 def main():
     avbroot = os.path.join(BIN_PATH, "avbroot")
     if not os.path.isfile(avbroot):
