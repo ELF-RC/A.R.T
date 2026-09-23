@@ -21,8 +21,6 @@
 
 #### **工具预览**
 
-[工具主页](https://github.com/ELF-RC/A.R.T/blob/master/Picture/image1.png)
-[设置](https://github.com/ELF-RC/A.R.T/blob/master/Picture/image2.png)
 
 #### **工程目录结构**
 
