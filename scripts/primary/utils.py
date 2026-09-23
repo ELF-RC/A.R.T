@@ -2,7 +2,6 @@
 
 import os
 from collections import deque
-import re
 import shlex
 import shutil
 import subprocess
@@ -414,13 +413,6 @@ def ceil(x):
     return int(x)
 
 
-def find_file(path, rule):
-    for (root, lists, files) in os.walk(path):
-        for file in files:
-            if re.search(rule, os.path.basename(file)):
-                yield os.path.join(root, file)
-
-
 def rmdire(path):
     if os.path.exists(path):
         try:
@@ -429,24 +421,6 @@ def rmdire(path):
             print("无法删除文件夹，权限不足")
         else:
             print("删除成功！")
-
-
-def appendf(msg, log):
-    if not os.path.isfile(log) and not os.path.exists(log):
-        open(log, 'tw', encoding='utf-8').close()
-    with open(log, 'w', newline='\n') as file:
-        print(msg, file=file)
-
-
-def _human_size(b):
-    if b < 1024:
-        return f"{b} B"
-    elif b < 1024 * 1024:
-        return f"{b / 1024:.1f} KB"
-    elif b < 1024 * 1024 * 1024:
-        return f"{b / (1024 * 1024):.1f} MB"
-    else:
-        return f"{b / (1024 * 1024 * 1024):.2f} GB"
 
 
 def safe_extract_zip(archive, destination):
@@ -466,24 +440,6 @@ def safe_extract_zip(archive, destination):
         except ValueError as error:
             raise LayoutError(f'ZIP 包含越界路径: {member.filename}') from error
     archive.extractall(destination)
-
-
-def safe_extract_tar(archive, destination):
-    """Stream regular TAR members into a validated WORKSPACE staging directory."""
-    import sys
-    destination = Path(destination).resolve()
-    for member in archive:
-        if not (member.isdir() or member.isfile()) or member.issym() or member.islnk():
-            raise LayoutError(f'TAR 不支持的条目类型: {member.name}')
-        target = (destination / member.name).resolve()
-        try:
-            target.relative_to(destination)
-        except ValueError as error:
-            raise LayoutError(f'TAR 包含越界路径: {member.name}') from error
-        if sys.version_info >= (3, 12):
-            archive.extract(member, path=destination, filter='fully_trusted')
-        else:
-            archive.extract(member, path=destination)
 
 
 # ═══════════════════════════════════════════════════════════════════════

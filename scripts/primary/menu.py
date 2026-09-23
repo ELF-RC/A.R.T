@@ -6,19 +6,18 @@ from glob import glob
 from pathlib import Path
 
 from scripts.primary.utils import (
-    V, PWD_DIR, RED, GREEN, YELLOW, CYAN, MAGENTA, BOLD, CLOSE,
-    display, rmdire, CoastTime, change_permissions_recursive,
+    V, PWD_DIR, RED, CLOSE,
+    display, rmdire, CoastTime,
 )
-from scripts.primary.config import load_setup_json, env_setup, check_permissions
+from scripts.primary.config import load_setup_json, env_setup
 from scripts.primary.workspace import envelop_project, workspace_partition
 from scripts.primary.workspace import LayoutError, UnsupportedLayoutError
-from scripts.extract.image import decompress, extract_zrom, decompress_img
+from scripts.extract.image import decompress, extract_zrom
 from scripts.extract.payload import decompress_bin
 from scripts.extract.win import decompress_win
 from scripts.remake.ext4 import recompress_ext4
 from scripts.remake.erofs import recompress_erofs
 from scripts.remake.super import repack_super
-from scripts.extract.boot import boot_unpack
 from scripts.remake.boot import boot_repack
 
 MOD_DIR = PWD_DIR + "local/sub/"
@@ -239,11 +238,6 @@ def menu_modules():
             input('> 任意键继续')
         else:
             print(f"> Number \x1b[0;33m{choice}\x1b[0m enter error !")
-
-
-def _tool_info_handler():
-    from scripts.primary import about as _ti
-    _ti.show()
 
 
 menu_actions = {

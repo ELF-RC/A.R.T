@@ -255,32 +255,6 @@ def metadata_path(config_dir, partition, suffix):
     return Path(config_dir) / f'{partition}{suffix}'
 
 
-def normalize_erofs_metadata(partition, config_dir):
-    """Normalize only this EROFS partition's metadata in a staging config directory."""
-    config_dir = Path(config_dir)
-    if config_dir.is_symlink() or not config_dir.is_dir():
-        raise LayoutError(f'{partition} 的 EROFS metadata 目录无效: {config_dir}')
-    raw_contexts = metadata_path(config_dir, partition, '_file_contexts')
-    raw_fsconfig = metadata_path(config_dir, partition, '_fs_config')
-    contexts = metadata_path(config_dir, partition, '_contexts.txt')
-    fsconfig = metadata_path(config_dir, partition, '_fsconfig.txt')
-    if raw_contexts.is_symlink() or raw_fsconfig.is_symlink():
-        raise LayoutError(f'{partition} 的 EROFS metadata 不能是符号链接')
-    if not (raw_contexts.is_file() and raw_fsconfig.is_file()):
-        print(f"> {partition} 的 EROFS metadata 不完整，已保留临时工作现场")
-        return False
-    os.replace(raw_contexts, contexts)
-    os.replace(raw_fsconfig, fsconfig)
-    return True
-
-
-def ensure_contexts_file(partition, config_dir):
-    """Create the canonical contexts file when an image has no SELinux xattrs."""
-    contexts = metadata_path(config_dir, partition, '_contexts.txt')
-    contexts.touch(exist_ok=True)
-    return contexts
-
-
 def create_partition_stage(partition, category, create_partition=True):
     """Prepare WORKSPACE/<partition>/ and WORKSPACE/config/ for direct extraction."""
     partition = ProjectLayout.validate_component(partition, '分区')
@@ -294,15 +268,6 @@ def create_partition_stage(partition, category, create_partition=True):
     return partition_dir.parent, partition_dir, config_dir
 
 
-def workspace_relative_path(relative_path):
-    """Resolve a configured relative path and keep it inside editable partitions."""
-    relative = Path(relative_path)
-    if relative.parts and relative.parts[0] in {'config'}:
-        raise LayoutError(f"不允许修改 WORKSPACE/{relative.parts[0]}")
-    return V.layout.require_workspace_path(Path(V.workspace, relative))
-
-
-
 def _destination_partition(distance, source):
     if distance:
         candidate = os.path.basename(os.path.normpath(distance))
@@ -312,19 +277,8 @@ def _destination_partition(distance, source):
     return candidate
 
 
-def _safe_remove_workspace_dir(path):
-    path = V.layout.require_workspace_path(path)
-    if path.is_dir():
-        shutil.rmtree(path)
-
-
 def _stage_work_source(source, category):
     """Return the source path directly; INPUT is read but never modified."""
-    return str(Path(source).resolve())
-
-
-def _canonical_stage_source(source, partition, stage_root):
-    """Return source directly; metadata names are aligned by partition name."""
     return str(Path(source).resolve())
 
 
@@ -378,62 +332,3 @@ def envelop_project():
     V.out = str(V.layout.out_dir) + os.sep
     V.workspace = str(V.layout.workspace_dir) + os.sep
     V.config = str(V.layout.config_dir) + os.sep
-
-
-def _super_images_to_process(super_dir):
-    """Return list of (image_path, partition_name) for images in super_dir."""
-    from glob import glob
-    images = sorted(glob(os.path.join(super_dir, '*.img')))
-    has_a_suffix = any(Path(img).stem.endswith('_a') for img in images)
-    if not has_a_suffix:
-        return [(image, partition_name(image)) for image in images if os.path.getsize(image) > 0]
-
-    a_parts = {}
-    b_parts = {}
-    other_parts = {}
-    for image in images:
-        p = Path(image)
-        stem = p.stem
-        if stem.endswith('_a'):
-            a_parts[stem[:-2]] = p
-        elif stem.endswith('_b'):
-            b_parts[stem[:-2]] = p
-        else:
-            if p.stat().st_size > 0:
-                other_parts[stem] = p
-
-    selected = []
-    for part in sorted(set(a_parts) | set(b_parts)):
-        pa = a_parts.get(part)
-        pb = b_parts.get(part)
-        size_a = pa.stat().st_size if pa and pa.exists() else 0
-        size_b = pb.stat().st_size if pb and pb.exists() else 0
-
-        if size_a == 0 and size_b == 0:
-            for p in (pa, pb):
-                if p and p.exists():
-                    p.unlink()
-        elif size_a > 0 and size_b > 0:
-            selected.append((str(pa), f'{part}_a'))
-            selected.append((str(pb), f'{part}_b'))
-        elif size_a > 0:
-            if pb and pb.exists():
-                pb.unlink()
-            dest = Path(super_dir) / f'{part}.img'
-            if dest.exists():
-                dest.unlink()
-            pa.rename(dest)
-            selected.append((str(dest), part))
-        else:
-            if pa and pa.exists():
-                pa.unlink()
-            dest = Path(super_dir) / f'{part}.img'
-            if dest.exists():
-                dest.unlink()
-            pb.rename(dest)
-            selected.append((str(dest), part))
-
-    for part, image in sorted(other_parts.items()):
-        selected.append((str(image), part))
-
-    return selected

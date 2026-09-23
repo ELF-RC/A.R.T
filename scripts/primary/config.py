@@ -6,7 +6,7 @@ import re
 import sys
 
 from scripts.primary.utils import (
-    PWD_DIR, BIN_PATH, V, GREEN, CYAN, YELLOW, BOLD, CLOSE, display, call,
+    PWD_DIR, V, GREEN, CYAN, YELLOW, BOLD, CLOSE,
 )
 
 SETUP_JSON = PWD_DIR + "art-res/settings.json"
