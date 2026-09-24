@@ -18,7 +18,7 @@ import os
 import sys
 import struct
 
-from scripts.primary.utils import RangeSet
+from scripts.primary.RangeModule import RangeSet
 
 
 # Sparse-image reader used by block OTA generation.

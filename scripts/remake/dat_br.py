@@ -4,11 +4,11 @@ import os
 import tempfile
 
 from scripts.primary import sparse_img
+from scripts.primary.RangeModule import RangeSet
 from scripts.primary.utils import (
     CLOSE,
     GREEN,
     RED,
-    RangeSet,
     V,
     call,
     display,
