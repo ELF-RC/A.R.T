@@ -3,9 +3,10 @@
 import os
 
 from scripts.primary.utils import (
-    V, display, call, CoastTime,
+    V, call,
     is_sparse_image, sparse_to_raw, raw_to_sparse,
 )
+from scripts.primary.menu import CoastTime, display
 from scripts.primary.workspace import LayoutError
 
 

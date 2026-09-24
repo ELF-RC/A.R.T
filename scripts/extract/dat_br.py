@@ -5,7 +5,8 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from scripts.primary.utils import V, RED, GREEN, YELLOW, CLOSE, display, call
+from scripts.primary.utils import V, RED, GREEN, YELLOW, CLOSE, call
+from scripts.primary.menu import display
 from scripts.primary.workspace import LayoutError
 from scripts.primary.workspace import partition_name, workspace_partition
 

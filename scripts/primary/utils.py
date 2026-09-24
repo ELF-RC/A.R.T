@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import struct
 import tempfile
-import time
 
 from pathlib import Path
 
@@ -386,25 +385,8 @@ def raw_to_sparse(source, destination=None, block_size=4096):
     return destination
 
 # ---------------------------------------------------------------------------
-# User-facing output and ordinary filesystem helpers
+# Ordinary filesystem helpers
 # ---------------------------------------------------------------------------
-class CoastTime:
-    def __init__(self):
-        self.t = 0
-
-    def __enter__(self):
-        self.t = time.perf_counter()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        print(f"> Coast Time:{time.perf_counter() - self.t:.8f} s")
-
-
-def display(message, flag=1, end='\n'):
-    flags = {1: "3", 2: "6", 3: "4", 4: "1"}
-    print(f"\x1b[1;3{flags[flag]}m [ {time.strftime('%H:%M:%S', time.localtime())} ]\t {message} \x1b[0m", end=end)
-
-
 def get_dir_size(ddir, max_=1.06):
     size = 0
     for (root, dirs, files) in os.walk(ddir):

@@ -3,7 +3,8 @@
 import os
 import subprocess
 
-from scripts.primary.utils import V, BIN_PATH, display, call
+from scripts.primary.utils import V, BIN_PATH, call
+from scripts.primary.menu import display
 from scripts.primary.utils import findfile
 
 

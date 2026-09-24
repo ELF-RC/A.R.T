@@ -2,27 +2,41 @@
 
 import os
 import sys
+import time
 from glob import glob
 from pathlib import Path
 
 from scripts.primary.utils import (
     V, PWD_DIR, RED, CLOSE,
-    display, rmdire, CoastTime,
+    rmdire,
 )
 from scripts.primary.config import load_setup_json, env_setup
 from scripts.primary.workspace import envelop_project, workspace_partition
 from scripts.primary.workspace import LayoutError, UnsupportedLayoutError
-from scripts.extract.image import decompress, extract_zrom
-from scripts.extract.payload import decompress_bin
-from scripts.extract.win import decompress_win
-from scripts.remake.ext4 import recompress_ext4
-from scripts.remake.erofs import recompress_erofs
-from scripts.remake.super import repack_super
-from scripts.remake.boot import boot_repack
 
 MOD_DIR = PWD_DIR + "local/sub/"
-
 _RESERVED_MENU_IDS = {44, 66, 88}
+
+
+# Console output and elapsed-time helpers.
+class CoastTime:
+    def __init__(self):
+        self.t = 0
+
+    def __enter__(self):
+        self.t = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        print(f"> Coast Time:{time.perf_counter() - self.t:.8f} s")
+
+
+def display(message, flag=1, end='\n'):
+    flags = {1: "3", 2: "6", 3: "4", 4: "1"}
+    print(
+        f"\x1b[1;3{flags[flag]}m [ {time.strftime('%H:%M:%S', time.localtime())} ]\t {message} \x1b[0m",
+        end=end,
+    )
 
 
 # Project and plugin listing helpers.
@@ -148,6 +162,7 @@ def menu_once():
 # Interactive super image input selection.
 def menu_super():
     """Interactive super image repack."""
+    from scripts.remake.super import repack_super
     os.system("clear")
     print(f'\x1b[1;36m> 合成 super.img\x1b[0m')
     print(f'> 请将需要打包的 .img 文件放入 INPUT 目录')
@@ -218,6 +233,7 @@ def menu_modules():
         if int(choice) == 88:
             sys.exit()
         elif int(choice) == 33:
+            from scripts.extract.image import extract_zrom
             extract_zrom(input("请输入插件路径："))
         elif int(choice) == 44:
             if V.dict0:
@@ -256,6 +272,12 @@ menu_actions = {
 # Per-project extraction, repacking, and utility menu.
 def menu_main():
     """Run the project menu iteratively."""
+    from scripts.extract.image import decompress
+    from scripts.extract.payload import decompress_bin
+    from scripts.extract.win import decompress_win
+    from scripts.remake.boot import boot_repack
+    from scripts.remake.erofs import recompress_erofs
+    from scripts.remake.ext4 import recompress_ext4
     V.JM = True
     while True:
         os.system("clear")

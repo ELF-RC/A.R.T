@@ -9,10 +9,10 @@ from scripts.primary.utils import (
     RED,
     V,
     call,
-    display,
     get_dir_size,
 )
 from scripts.primary.FileConfigPatcher import patch_fsconfig
+from scripts.primary.menu import display
 from scripts.primary.workspace import load_image_json
 from scripts.remake.dat_br import recompress_dat_br
 

@@ -4,7 +4,8 @@ import os
 import shutil
 from pathlib import Path
 
-from scripts.primary.utils import V, display, call, rmdire
+from scripts.primary.utils import V, call, rmdire
+from scripts.primary.menu import display
 from scripts.primary.utils import get_file_type
 
 

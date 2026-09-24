@@ -5,13 +5,13 @@ import tempfile
 
 from scripts.primary import sparse_img
 from scripts.primary.RangeModule import RangeSet
+from scripts.primary.menu import display
 from scripts.primary.utils import (
     CLOSE,
     GREEN,
     RED,
     V,
     call,
-    display,
 )
 
 

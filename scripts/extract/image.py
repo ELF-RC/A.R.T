@@ -14,7 +14,8 @@ import os
 import time
 from glob import glob
 
-from scripts.primary.utils import V, RED, CLOSE, display
+from scripts.primary.utils import V, RED, CLOSE
+from scripts.primary.menu import display
 from scripts.primary.utils import get_file_type
 from scripts.primary.workspace import LayoutError
 from scripts.primary.workspace import (
