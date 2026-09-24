@@ -2,7 +2,6 @@
 
 import os
 import sys
-import time
 from glob import glob
 from pathlib import Path
 
@@ -10,33 +9,13 @@ from Scripts.Primary.Utils import (
     V, PWD_DIR, RED, CLOSE,
     rmdire,
 )
+from Scripts.Primary.Console import CoastTime, display
 from Scripts.Primary.Settings import load_setup_json, env_setup
 from Scripts.Primary.WorkSpace import envelop_project, workspace_partition
 from Scripts.Primary.WorkSpace import LayoutError, UnsupportedLayoutError
 
 MOD_DIR = PWD_DIR + "local/sub/"
 _RESERVED_MENU_IDS = {44, 66, 88}
-
-
-# Console output and elapsed-time helpers.
-class CoastTime:
-    def __init__(self):
-        self.t = 0
-
-    def __enter__(self):
-        self.t = time.perf_counter()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        print(f"> Coast Time:{time.perf_counter() - self.t:.8f} s")
-
-
-def display(message, flag=1, end='\n'):
-    flags = {1: "3", 2: "6", 3: "4", 4: "1"}
-    print(
-        f"\x1b[1;3{flags[flag]}m [ {time.strftime('%H:%M:%S', time.localtime())} ]\t {message} \x1b[0m",
-        end=end,
-    )
 
 
 # Project and plugin listing helpers.

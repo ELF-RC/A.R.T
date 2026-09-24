@@ -15,8 +15,8 @@ import time
 from glob import glob
 
 from Scripts.Primary.Utils import V, RED, CLOSE
-from Scripts.Primary.Menu import display
-from Scripts.Primary.Utils import get_file_type
+from Scripts.Primary.Console import display
+from Scripts.Primary.ImageTools import get_file_type
 from Scripts.Primary.WorkSpace import LayoutError
 from Scripts.Primary.WorkSpace import (
     partition_name, workspace_partition, workspace_temp,
@@ -67,7 +67,7 @@ def decompress_img(source, distance=None, keep=1):
             print(f'> {partition} boot 分解失败: {error}')
 
     elif file_type == 'sparse':
-        from Scripts.Primary.Utils import sparse_to_raw
+        from Scripts.Primary.ImageTools import sparse_to_raw
         try:
             raw_source = sparse_to_raw(working_source)
         except Exception as error:

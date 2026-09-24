@@ -9,7 +9,8 @@ import sys
 import tarfile
 from pathlib import Path
 
-from Scripts.Primary.Utils import V, get_file_type
+from Scripts.Primary.Utils import V
+from Scripts.Primary.ImageTools import get_file_type
 
 
 # Validate, stage, and safely unpack WIN content.

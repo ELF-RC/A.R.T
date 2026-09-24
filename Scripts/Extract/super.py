@@ -4,8 +4,9 @@ import os
 import shutil
 from pathlib import Path
 
-from Scripts.Primary.Utils import V, is_sparse_image, sparse_to_raw
-from Scripts.Primary.Menu import display
+from Scripts.Primary.Utils import V
+from Scripts.Primary.ImageTools import is_sparse_image, sparse_to_raw
+from Scripts.Primary.Console import display
 from Scripts.Primary.WorkSpace import workspace_partition
 
 

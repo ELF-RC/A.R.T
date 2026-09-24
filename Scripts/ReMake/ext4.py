@@ -13,7 +13,7 @@ from Scripts.Primary.Utils import (
     get_dir_size,
 )
 from Scripts.Primary.FileConfigPatcher import patch_fsconfig
-from Scripts.Primary.Menu import display
+from Scripts.Primary.Console import display
 from Scripts.Primary.WorkSpace import load_image_json
 from Scripts.ReMake.dat_br import recompress_dat_br
 

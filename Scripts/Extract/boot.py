@@ -5,8 +5,8 @@ import shutil
 from pathlib import Path
 
 from Scripts.Primary.Utils import V, call, rmdire
-from Scripts.Primary.Menu import display
-from Scripts.Primary.Utils import get_file_type
+from Scripts.Primary.Console import display
+from Scripts.Primary.ImageTools import get_file_type
 
 
 # Low-level magiskboot unpack and ramdisk extraction.

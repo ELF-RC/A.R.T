@@ -919,7 +919,7 @@ import os
 import re
 import struct
 from pathlib import Path
-from Scripts.Primary.Utils import sparse_to_raw
+from Scripts.Primary.ImageTools import sparse_to_raw
 
 
 SPARSE_HEADER_MAGIC = 0xED26FF3A

@@ -4,7 +4,7 @@ import os
 import subprocess
 
 from Scripts.Primary.Utils import V, BIN_PATH, call
-from Scripts.Primary.Menu import display
+from Scripts.Primary.Console import display
 from Scripts.Primary.Utils import findfile
 
 

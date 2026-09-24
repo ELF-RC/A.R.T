@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from Scripts.Primary.Utils import V, call
-from Scripts.Primary.Menu import display
+from Scripts.Primary.Console import display
 
 
 # Validate partition paths and normalize extractor metadata.

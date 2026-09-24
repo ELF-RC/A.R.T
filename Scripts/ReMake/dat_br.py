@@ -5,7 +5,7 @@ import tempfile
 
 from Scripts.Primary import SparseMap
 from Scripts.Primary.RangeModule import RangeSet
-from Scripts.Primary.Menu import display
+from Scripts.Primary.Console import display
 from Scripts.Primary.Utils import (
     CLOSE,
     GREEN,

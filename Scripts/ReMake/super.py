@@ -2,11 +2,11 @@
 
 import os
 
-from Scripts.Primary.Utils import (
-    V, call,
+from Scripts.Primary.Utils import V, call
+from Scripts.Primary.ImageTools import (
     is_sparse_image, sparse_to_raw, raw_to_sparse,
 )
-from Scripts.Primary.Menu import CoastTime, display
+from Scripts.Primary.Console import CoastTime, display
 from Scripts.Primary.WorkSpace import LayoutError
 
 
