@@ -10,7 +10,7 @@ from Scripts.Primary.Utils import (
     V, PWD_DIR, RED, CLOSE,
     rmdire,
 )
-from Scripts.Primary.Config import load_setup_json, env_setup
+from Scripts.Primary.Settings import load_setup_json, env_setup
 from Scripts.Primary.WorkSpace import envelop_project, workspace_partition
 from Scripts.Primary.WorkSpace import LayoutError, UnsupportedLayoutError
 

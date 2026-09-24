@@ -32,7 +32,7 @@ def exception_handler(exception_type, exception, traceback):
 
 
 def init():
-    from Scripts.Primary.Config import check_permissions
+    from Scripts.Primary.Settings import check_permissions
     check_permissions()
     menu_once()
 
