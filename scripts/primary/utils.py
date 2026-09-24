@@ -488,7 +488,7 @@ _FILE_SIGNATURES = (
 )
 
 
-def gettype(file) -> str:
+def get_file_type(file) -> str:
     """Detect file type by magic bytes. Returns format string or 'unknown'."""
     if not os.path.exists(file):
         return "fne"

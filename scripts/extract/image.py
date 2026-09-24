@@ -15,7 +15,7 @@ import time
 from glob import glob
 
 from scripts.primary.utils import V, RED, CLOSE, display
-from scripts.primary.utils import gettype
+from scripts.primary.utils import get_file_type
 from scripts.primary.workspace import LayoutError
 from scripts.primary.workspace import (
     partition_name, workspace_partition, workspace_temp,
@@ -28,10 +28,10 @@ def decompress_img(source, distance=None, keep=1):
     """Extract one image directly into WORKSPACE/<partition>/.
 
     Dispatches to the appropriate format-specific extractor based on
-    the image type detected by gettype.
+    the image type detected by get_file_type.
     """
     del keep
-    source_type = gettype(source)
+    source_type = get_file_type(source)
     if source_type not in ('boot', 'vendor_boot', 'sparse', 'ext', 'erofs', 'super'):
         print(f'> 不支持的镜像类型: {source_type}')
         return
@@ -47,7 +47,7 @@ def decompress_img(source, distance=None, keep=1):
 
     destination = workspace_partition(partition)
     s_time = time.time()
-    file_type = gettype(working_source)
+    file_type = get_file_type(working_source)
     committed = False
 
     if file_type in ('boot', 'vendor_boot'):
@@ -111,7 +111,7 @@ def decompress(infile, flag=4):
         try:
             if os.path.basename(part) in ('dsp.img', 'cust.img'):
                 continue
-            if gettype(part) not in ('ext', 'sparse', 'erofs', 'super', 'boot', 'vendor_boot'):
+            if get_file_type(part) not in ('ext', 'sparse', 'erofs', 'super', 'boot', 'vendor_boot'):
                 continue
             if not V.JM:
                 display(f'是否分解: {os.path.basename(part)} [1/0]: ', 2, '')

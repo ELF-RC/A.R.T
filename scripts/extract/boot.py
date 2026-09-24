@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from scripts.primary.utils import V, display, call, rmdire
-from scripts.primary.utils import gettype
+from scripts.primary.utils import get_file_type
 
 
 # Low-level magiskboot unpack and ramdisk extraction.
@@ -27,7 +27,7 @@ def unpackboot(file, distance):
             print("Unpack Done!")
             return True
 
-        comp = gettype(str(ramdisk))
+        comp = get_file_type(str(ramdisk))
         print(f"Ramdisk is {comp}")
         (work_dir / 'comp').write_text(comp, encoding='utf-8')
         if comp != 'unknown':

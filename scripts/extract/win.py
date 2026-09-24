@@ -9,7 +9,7 @@ import sys
 import tarfile
 from pathlib import Path
 
-from scripts.primary.utils import V, gettype
+from scripts.primary.utils import V, get_file_type
 
 
 # Validate, stage, and safely unpack WIN content.
@@ -101,7 +101,7 @@ def decompress_win(infile_list):
                     print(f'合并 {fragment} 到 {staged_win}')
                     with open(fragment, 'rb') as source_file:
                         shutil.copyfileobj(source_file, destination_file)
-            file_type = gettype(str(staged_win))
+            file_type = get_file_type(str(staged_win))
             if file_type in {'erofs', 'ext', 'sparse', 'super', 'boot', 'vendor_boot'}:
                 from scripts.extract.image import decompress_img
                 decompress_img(str(staged_win), str(_workspace_partition(partition)))
