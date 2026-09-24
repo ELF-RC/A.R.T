@@ -11,8 +11,8 @@ from scripts.primary.utils import (
     call,
     display,
     get_dir_size,
-    patch_fsconfig,
 )
+from scripts.primary.FileConfigPatcher import patch_fsconfig
 from scripts.primary.workspace import load_image_json
 from scripts.remake.dat_br import recompress_dat_br
 
