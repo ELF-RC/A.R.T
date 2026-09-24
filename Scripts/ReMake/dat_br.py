@@ -3,7 +3,7 @@
 import os
 import tempfile
 
-from Scripts.Primary import sparse_img
+from Scripts.Primary import SparseMap
 from Scripts.Primary.RangeModule import RangeSet
 from Scripts.Primary.Menu import display
 from Scripts.Primary.Utils import (
@@ -1177,7 +1177,7 @@ def _image_to_dat(input_image, outdir='.', version=None, prefix='system'):
 
     output_prefix = outdir + '/' + prefix
     BlockImageDiff(
-        sparse_img.SparseImage(input_image, tempfile.mkstemp()[1], '0'),
+        SparseMap.SparseImage(input_image, tempfile.mkstemp()[1], '0'),
         None,
         version,
     ).Compute(output_prefix)
