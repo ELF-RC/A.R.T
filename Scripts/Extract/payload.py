@@ -8,6 +8,9 @@ import os
 import re
 import shutil
 import struct
+import sys
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
@@ -195,6 +198,72 @@ def _validate_partition(name: str) -> str:
 
 
 # Bounded compressed-data readers and extent writers.
+@contextmanager
+def _progress_context():
+    """Create a low-overhead Rich progress display for interactive terminals."""
+    is_tty = getattr(sys.stdout, 'isatty', lambda: False)
+    if not is_tty():
+        yield None
+        return
+    try:
+        from rich.progress import (
+            BarColumn,
+            Progress,
+            TextColumn,
+            TransferSpeedColumn,
+        )
+    except ImportError:
+        # Keep payload extraction usable in minimal environments.
+        yield None
+        return
+
+    progress = Progress(
+        TextColumn('[progress.description]{task.description}'),
+        BarColumn(),
+        TextColumn('[progress.percentage]{task.percentage:>3.0f}%'),
+        TransferSpeedColumn(),
+        refresh_per_second=4,
+        transient=False,
+    )
+    with progress:
+        yield progress
+
+
+class _ProgressReporter:
+    """Throttle progress updates so Rich does not run once per output chunk."""
+
+    _MIN_UPDATE_BYTES = 512 * 1024
+    _UPDATE_INTERVAL = 0.25
+
+    def __init__(self, progress, task_id, total):
+        self.progress = progress
+        self.task_id = task_id
+        self.total = total
+        self._pending = 0
+        self._last_update = time.monotonic() - self._UPDATE_INTERVAL
+
+    def advance(self, amount):
+        self._pending += amount
+        if self._pending < self._MIN_UPDATE_BYTES:
+            return
+        now = time.monotonic()
+        if now - self._last_update >= self._UPDATE_INTERVAL:
+            self._flush(now)
+
+    def _flush(self, now=None):
+        if not self._pending:
+            return
+        self.progress.update(self.task_id, advance=self._pending)
+        self._pending = 0
+        self._last_update = time.monotonic() if now is None else now
+
+    def finish(self):
+        self._flush()
+        # Set the final value explicitly so empty/very small partitions also
+        # render as 100% after all validated writes have completed.
+        self.progress.update(self.task_id, completed=self.total)
+
+
 class _LimitedReader:
     def __init__(self, stream, length: int, chunk_size: int):
         self.stream = stream
@@ -213,10 +282,11 @@ class _LimitedReader:
 
 
 class _ExtentWriter:
-    def __init__(self, output_file, extents, block_size):
+    def __init__(self, output_file, extents, block_size, on_write=None):
         self.output_file = output_file
         self.extents = tuple(extents)
         self.block_size = block_size
+        self.on_write = on_write
         self.expected = sum(item.num_blocks * block_size for item in self.extents)
         self.written = 0
         self.index = 0
@@ -245,6 +315,8 @@ class _ExtentWriter:
                 raise PayloadError('Payload extents 写入不完整')
             self.remaining -= written
             self.written += written
+            if self.on_write is not None:
+                self.on_write(written)
             view = view[written:]
 
     def write_zeroes(self):
@@ -285,11 +357,13 @@ class _PayloadDumper:
             print('> Payload 没有可分解的分区')
             return False
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        for partition in selected:
-            self._dump_partition(partition)
+        self._progress_task_id = None
+        with _progress_context() as progress:
+            for partition in selected:
+                self._dump_partition(partition, progress)
         return True
 
-    def _dump_partition(self, partition):
+    def _dump_partition(self, partition, progress=None):
         name = _validate_partition(partition.partition_name)
         output_path = self.output_dir / f'{name}.img'
         operations = tuple(
@@ -297,18 +371,50 @@ class _PayloadDumper:
             for operation in partition.operations
         )
         total_size = partition.size
+        progress_total = 0
         for _, operation in operations:
             for extent in operation.dst_extents:
+                extent_size = extent.num_blocks * self.block_size
                 total_size = max(
                     total_size,
                     (extent.start_block + extent.num_blocks) * self.block_size,
                 )
+                progress_total += extent_size
+        progress_reporter = None
+        if progress is not None:
+            # Count actual destination extents so the bar reaches 100% exactly
+            # when all install operations have been materialized.
+            progress_total = max(progress_total, 1)
+            task_id = getattr(self, '_progress_task_id', None)
+            if task_id is None:
+                task_id = progress.add_task(
+                    f'Payload {name}', total=progress_total
+                )
+                self._progress_task_id = task_id
+            else:
+                progress.reset(
+                    task_id,
+                    description=f'Payload {name}',
+                    total=progress_total,
+                    completed=0,
+                    start=True,
+                )
+            progress_reporter = _ProgressReporter(progress, task_id, progress_total)
+
         with open(output_path, 'wb') as output_file:
             output_file.truncate(total_size)
         with open(self.payload_path, 'rb') as payload_file, open(output_path, 'r+b') as output_file:
             for data_offset, operation in operations:
-                self._write_operation(data_offset, operation, payload_file, output_file)
-        print(f'> Payload 分解完成: {name}.img')
+                self._write_operation(
+                    data_offset, operation, payload_file, output_file, progress_reporter
+                )
+        if progress_reporter is not None:
+            progress_reporter.finish()
+        message = f'> Payload 分解完成: {name}.img'
+        if progress is None:
+            print(message)
+        else:
+            progress.console.print(message)
 
     def _read_data(self, stream, size):
         remaining = size
@@ -334,9 +440,14 @@ class _PayloadDumper:
         if not decoder.eof:
             raise PayloadError('Payload 压缩操作未正常结束')
 
-    def _write_operation(self, data_offset, operation, payload_file, output_file):
+    def _write_operation(
+        self, data_offset, operation, payload_file, output_file, progress_reporter=None
+    ):
         payload_file.seek(data_offset)
-        writer = _ExtentWriter(output_file, operation.dst_extents, self.block_size)
+        on_write = progress_reporter.advance if progress_reporter is not None else None
+        writer = _ExtentWriter(
+            output_file, operation.dst_extents, self.block_size, on_write=on_write
+        )
         if operation.operation_type == _REPLACE_XZ:
             self._write_compressed(
                 lzma.LZMADecompressor(), payload_file, operation.data_length, writer
