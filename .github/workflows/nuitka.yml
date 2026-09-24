@@ -1,6 +1,7 @@
 name: Build A.R.T (Nuitka)
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       version:
