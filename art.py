@@ -13,7 +13,7 @@ def _configure_stdio_encoding():
 
 _configure_stdio_encoding()
 
-from scripts.primary.menu import menu_once
+from Scripts.Primary.Menu import menu_once
 def exception_handler(exception_type, exception, traceback):
     del traceback
     print("很抱歉，工具出现错误， 请把以下日志提交给开发者：")
@@ -25,7 +25,7 @@ def exception_handler(exception_type, exception, traceback):
 
 
 def init():
-    from scripts.primary.config import check_permissions
+    from Scripts.Primary.Config import check_permissions
     check_permissions()
     menu_once()
 

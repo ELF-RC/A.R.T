@@ -29,11 +29,11 @@ def main():
         if choice in ('00', '0'):
             return
         elif choice in ('01', '1'):
-            from scripts.remake import payload
+            from Scripts.ReMake import payload
             payload.main()
             input('> 任意键继续')
         elif choice in ('02', '2'):
-            from scripts.primary import avbtool
+            from Scripts.Primary import avbtool
             avbtool.main()
             input('> 任意键继续')
         else:

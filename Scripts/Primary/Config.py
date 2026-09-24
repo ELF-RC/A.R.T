@@ -5,7 +5,7 @@ import os
 import re
 import sys
 
-from scripts.primary.utils import (
+from Scripts.Primary.Utils import (
     PWD_DIR, V, GREEN, CYAN, YELLOW, BOLD, CLOSE,
 )
 

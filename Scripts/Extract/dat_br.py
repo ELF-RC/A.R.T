@@ -5,10 +5,10 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from scripts.primary.utils import V, RED, GREEN, YELLOW, CLOSE, call
-from scripts.primary.menu import display
-from scripts.primary.workspace import LayoutError
-from scripts.primary.workspace import partition_name, workspace_partition
+from Scripts.Primary.Utils import V, RED, GREEN, YELLOW, CLOSE, call
+from Scripts.Primary.Menu import display
+from Scripts.Primary.WorkSpace import LayoutError
+from Scripts.Primary.WorkSpace import partition_name, workspace_partition
 
 
 # Embedded DAT-to-image converter; this module no longer imports sdat2img.py.
@@ -190,7 +190,7 @@ def _combine_fragments(source):
 # Decode one plain .new.dat partition.
 def decompress_dat(transfer, source, distance=None, keep=0):
     """Convert DAT directly: read transfer.list + dat from INPUT, extract to partition."""
-    from scripts.extract.image import decompress_img
+    from Scripts.Extract.image import decompress_img
 
     del distance, keep
     if not transfer or not os.path.isfile(transfer):

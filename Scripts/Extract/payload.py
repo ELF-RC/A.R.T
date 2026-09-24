@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
 
-from scripts.primary.utils import V, RED, GREEN, YELLOW, MAGENTA, CLOSE
-from scripts.primary.workspace import (
+from Scripts.Primary.Utils import V, RED, GREEN, YELLOW, MAGENTA, CLOSE
+from Scripts.Primary.WorkSpace import (
     LayoutError, _stage_work_source, partition_name, workspace_partition,
 )
 
@@ -463,7 +463,7 @@ def _decompress_payload_images(payload, payload_dir, mode):
         return
 
     # Only after confirmation do we connect to the image dispatcher.
-    from scripts.extract.image import decompress_img
+    from Scripts.Extract.image import decompress_img
 
     for image in images:
         try:

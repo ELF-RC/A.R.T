@@ -4,17 +4,17 @@ import os
 import shutil
 import time
 
-from scripts.primary.utils import (
+from Scripts.Primary.Utils import (
     CLOSE,
     RED,
     V,
     call,
     get_dir_size,
 )
-from scripts.primary.FileConfigPatcher import patch_fsconfig
-from scripts.primary.menu import display
-from scripts.primary.workspace import load_image_json
-from scripts.remake.dat_br import recompress_dat_br
+from Scripts.Primary.FileConfigPatcher import patch_fsconfig
+from Scripts.Primary.Menu import display
+from Scripts.Primary.WorkSpace import load_image_json
+from Scripts.ReMake.dat_br import recompress_dat_br
 
 
 # Metadata normalization, image construction, and DAT hand-off.

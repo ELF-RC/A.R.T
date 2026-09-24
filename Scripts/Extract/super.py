@@ -4,9 +4,9 @@ import os
 import shutil
 from pathlib import Path
 
-from scripts.primary.utils import V, is_sparse_image, sparse_to_raw
-from scripts.primary.menu import display
-from scripts.primary.workspace import workspace_partition
+from Scripts.Primary.Utils import V, is_sparse_image, sparse_to_raw
+from Scripts.Primary.Menu import display
+from Scripts.Primary.WorkSpace import workspace_partition
 
 
 # Normalize logical-partition image names before recursion.
@@ -108,7 +108,7 @@ def extract_super(working_source, partition):
 
     Returns True if handled (either extracted or moved to OUT), False on failure.
     """
-    from scripts.extract.image import decompress_img
+    from Scripts.Extract.image import decompress_img
 
     display(f'正在分解: {os.path.basename(working_source)} <super>', 3)
     super_dir = os.path.join(V.workspace, 'super') + os.sep

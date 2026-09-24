@@ -3,9 +3,9 @@
 import os
 import subprocess
 
-from scripts.primary.utils import V, BIN_PATH, call
-from scripts.primary.menu import display
-from scripts.primary.utils import findfile
+from Scripts.Primary.Utils import V, BIN_PATH, call
+from Scripts.Primary.Menu import display
+from Scripts.Primary.Utils import findfile
 
 
 # Low-level ramdisk packing and magiskboot repack.

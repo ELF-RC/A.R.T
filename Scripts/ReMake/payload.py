@@ -4,7 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from scripts.primary.utils import V, BIN_PATH
+from Scripts.Primary.Utils import V, BIN_PATH
 
 YELLOW = '\x1b[1;33m'
 GREEN = '\x1b[1;32m'

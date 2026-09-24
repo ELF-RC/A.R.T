@@ -6,13 +6,13 @@ import time
 from glob import glob
 from pathlib import Path
 
-from scripts.primary.utils import (
+from Scripts.Primary.Utils import (
     V, PWD_DIR, RED, CLOSE,
     rmdire,
 )
-from scripts.primary.config import load_setup_json, env_setup
-from scripts.primary.workspace import envelop_project, workspace_partition
-from scripts.primary.workspace import LayoutError, UnsupportedLayoutError
+from Scripts.Primary.Config import load_setup_json, env_setup
+from Scripts.Primary.WorkSpace import envelop_project, workspace_partition
+from Scripts.Primary.WorkSpace import LayoutError, UnsupportedLayoutError
 
 MOD_DIR = PWD_DIR + "local/sub/"
 _RESERVED_MENU_IDS = {44, 66, 88}
@@ -89,7 +89,7 @@ def creat_project():
 
     V.project = "DNA_" + creat_name
     try:
-        from scripts.primary.workspace import ProjectLayout
+        from Scripts.Primary.WorkSpace import ProjectLayout
         ProjectLayout.validate_component(V.project, "工程")
     except LayoutError as error:
         input(f"> 工程名称无效: {error}")
@@ -140,7 +140,7 @@ def menu_once():
             env_setup()
             load_setup_json()
         elif int(choice) == 88:
-            from scripts.primary import about as _ti
+            from Scripts.Primary import About as _ti
             _ti.show()
         elif int(choice) == 0:
             if creat_project():
@@ -162,7 +162,7 @@ def menu_once():
 # Interactive super image input selection.
 def menu_super():
     """Interactive super image repack."""
-    from scripts.remake.super import repack_super
+    from Scripts.ReMake.super import repack_super
     os.system("clear")
     print(f'\x1b[1;36m> 合成 super.img\x1b[0m')
     print(f'> 请将需要打包的 .img 文件放入 INPUT 目录')
@@ -233,7 +233,7 @@ def menu_modules():
         if int(choice) == 88:
             sys.exit()
         elif int(choice) == 33:
-            from scripts.extract.image import extract_zrom
+            from Scripts.Extract.image import extract_zrom
             extract_zrom(input("请输入插件路径："))
         elif int(choice) == 44:
             if V.dict0:
@@ -254,7 +254,7 @@ def menu_modules():
             os.system("clear")
             print(f"\x1b[1;31m> 执行插件:\x1b[0m {os.path.basename(V.dict0[int(choice)])}\n")
             if os.path.isfile(shell_sub := (V.dict0[int(choice)] + os.sep + "run.sh")):
-                from scripts.primary.utils import call
+                from Scripts.Primary.Utils import call
                 call(['busybox', 'bash', shell_sub, V.workspace.replace(os.sep, '/')])
             input('> 任意键继续')
         else:
@@ -272,12 +272,12 @@ menu_actions = {
 # Per-project extraction, repacking, and utility menu.
 def menu_main():
     """Run the project menu iteratively."""
-    from scripts.extract.image import decompress
-    from scripts.extract.payload import decompress_bin
-    from scripts.extract.win import decompress_win
-    from scripts.remake.boot import boot_repack
-    from scripts.remake.erofs import recompress_erofs
-    from scripts.remake.ext4 import recompress_ext4
+    from Scripts.Extract.image import decompress
+    from Scripts.Extract.payload import decompress_bin
+    from Scripts.Extract.win import decompress_win
+    from Scripts.ReMake.boot import boot_repack
+    from Scripts.ReMake.erofs import recompress_erofs
+    from Scripts.ReMake.ext4 import recompress_ext4
     V.JM = True
     while True:
         os.system("clear")
@@ -325,12 +325,12 @@ def menu_main():
             quiet()
             decompress_win(list(set(sorted(infile))))
         elif int(option) == 6:
-            from scripts.extract.super import super_selective_main
+            from Scripts.Extract.super import super_selective_main
             super_selective_main()
             input('> 任意键继续')
             continue
         elif int(option) == 12:
-            from scripts.primary import more
+            from Scripts.Primary import More
             more.main()
             continue
         elif int(option) in [9, 10, 11]:

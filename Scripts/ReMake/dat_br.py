@@ -3,10 +3,10 @@
 import os
 import tempfile
 
-from scripts.primary import sparse_img
-from scripts.primary.RangeModule import RangeSet
-from scripts.primary.menu import display
-from scripts.primary.utils import (
+from Scripts.Primary import sparse_img
+from Scripts.Primary.RangeModule import RangeSet
+from Scripts.Primary.Menu import display
+from Scripts.Primary.Utils import (
     CLOSE,
     GREEN,
     RED,

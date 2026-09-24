@@ -2,12 +2,12 @@
 
 import os
 
-from scripts.primary.utils import (
+from Scripts.Primary.Utils import (
     V, call,
     is_sparse_image, sparse_to_raw, raw_to_sparse,
 )
-from scripts.primary.menu import CoastTime, display
-from scripts.primary.workspace import LayoutError
+from Scripts.Primary.Menu import CoastTime, display
+from Scripts.Primary.WorkSpace import LayoutError
 
 
 # Build lpmake arguments and emit super.img.
