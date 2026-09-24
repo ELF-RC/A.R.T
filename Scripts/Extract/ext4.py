@@ -8,6 +8,7 @@ import ctypes
 from functools import cmp_to_key
 import io
 import queue
+import shutil
 
 
 def wcs_cmp(str_a, str_b):
@@ -508,7 +509,7 @@ class Volume:
         group_idx, inode_table_entry_idx = self.get_inode_group(inode_idx)
         try:
             inode_table_offset = self.group_descriptors[group_idx].bg_inode_table * self.block_size
-        except Exception:
+        except (IndexError, AttributeError):
             inode_table_offset = 99 * self.block_size
         inode_offset = inode_table_offset + inode_table_entry_idx * self.superblock.s_inode_size
 
@@ -796,8 +797,8 @@ class Inode:
             try:
                 for xattr_name, xattr_value in self._parse_xattrs(inline_data[offset:], 0):
                     yield xattr_name, xattr_value
-            except Exception:
-                ...
+            except (ValueError, IndexError, struct.error) as error:
+                print(f'Invalid inline xattrs for inode {self.inode_idx}: {error}')
         # xattr block(s)
         if check_block and self.inode.i_file_acl != 0:
             xattrs_block_start = self.inode.i_file_acl * self.volume.block_size
@@ -1035,7 +1036,7 @@ class ULTRAMAN(object):
         if os.path.exists(output_file):
             try:
                 os.remove(output_file)
-            except:
+            except OSError:
                 pass
         with open(input_file, 'rb') as f:
             data = f.read(500000)
@@ -1059,7 +1060,7 @@ class ULTRAMAN(object):
         try:
             os.remove(input_file)
             os.rename(output_file, input_file)
-        except:
+        except OSError:
             pass
 
     def __fix_size(self):
@@ -1090,13 +1091,22 @@ class ULTRAMAN(object):
             moto = re.search(b'MOTO', stream.read(500000))
         if moto:
             self.FIX_MOTO(os.path.abspath(self.OUTPUT_IMAGE_FILE))
-        self.__fix_size()
-        self.EXT4_EXTRACTOR()
+        try:
+            self.__fix_size()
+            self.EXT4_EXTRACTOR()
+        finally:
+            if image_type == 'simg' and os.path.isfile(self.OUTPUT_IMAGE_FILE):
+                os.remove(self.OUTPUT_IMAGE_FILE)
         return True
 
     def Simg2Rimg(self, target):
         """Convert sparse data through the shared utility module."""
-        return sparse_to_raw(target)
+        temp_dir = os.path.dirname(self.EXTRACT_DIR)
+        destination = os.path.join(
+            temp_dir,
+            f".{os.path.basename(target)}.unsparse.img",
+        )
+        return sparse_to_raw(target, destination, temp_dir=temp_dir)
     def EXT4_EXTRACTOR(self):
         output_root = Path(self.EXTRACT_DIR).resolve()
         config_dir = output_root.parent / 'config'
@@ -1339,6 +1349,6 @@ def extract_ext4(working_source, partition, destination):
         ULTRAMAN().MONSTER(working_source, str(output_dir))
         _verify_metadata(partition, config_dir)
         return True
-    except Exception as error:
+    except (ImageExtractionError, OSError, ValueError, struct.error, UnicodeError) as error:
         print(f"> EXT4 分解失败: {error}")
         return False

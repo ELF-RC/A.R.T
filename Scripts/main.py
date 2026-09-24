@@ -33,6 +33,8 @@ def exception_handler(exception_type, exception, traceback):
 
 def init():
     from Scripts.Primary.Settings import check_permissions
+    from Scripts.Primary.Utils import init_bin_path
+    init_bin_path()
     check_permissions()
     menu_once()
 

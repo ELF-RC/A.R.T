@@ -5,17 +5,46 @@ extract, remake, and primary packages.
 """
 
 import os
+import platform
+import sys
 import shlex
 import shutil
 import subprocess
 
 from pathlib import Path
 
+
+class LayoutError(RuntimeError):
+    """Base error for invalid project layouts and unsafe paths."""
+
 # ---------------------------------------------------------------------------
 # Runtime state and bundled external-tool paths
 # ---------------------------------------------------------------------------
-PWD_DIR = os.getcwd() + os.sep
-BIN_PATH = PWD_DIR + "art-res/bin/"
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+_RESOURCE_ROOT_CANDIDATES = [
+    Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else None,
+    SOURCE_ROOT,
+    Path.cwd(),
+]
+ROOT_DIR = next(
+    (candidate for candidate in _RESOURCE_ROOT_CANDIDATES
+     if candidate is not None and (candidate / "art-res").is_dir()),
+    SOURCE_ROOT,
+)
+PWD_DIR = str(ROOT_DIR) + os.sep
+
+
+def _bundled_bin_path() -> Path:
+    architecture = platform.machine().lower()
+    suffix = "arm64" if architecture in {"aarch64", "arm64"} else "amd64"
+    candidates = (
+        ROOT_DIR / "art-res" / "bin",
+        ROOT_DIR / "art-res" / f"bin-{suffix}",
+    )
+    return next((candidate for candidate in candidates if candidate.is_dir()), candidates[0])
+
+
+BIN_PATH = str(_bundled_bin_path()) + os.sep
 
 RED, WHITE, CYAN, YELLOW, MAGENTA, GREEN, BOLD, CLOSE = [
     '\x1b[91m', '\x1b[97m', '\x1b[36m', '\x1b[93m',
@@ -35,10 +64,7 @@ class GlobalValue(object):
         ]
 
     def __getattr__(self, item):
-        try:
-            return getattr(self, item)
-        except (Exception, BaseException):
-            return "None"
+        return None
 
 
 V = GlobalValue()
@@ -54,6 +80,21 @@ def change_permissions_recursive(path, mode):
     os.chmod(path, mode)
 
 
+def _normalize_bin_permissions(path):
+    """Set bundled-tool directories to 0777 and regular files to 0755."""
+    if os.path.islink(path):
+        return
+    for root, dirs, files in os.walk(path, followlinks=False):
+        dirs[:] = [name for name in dirs if not os.path.islink(os.path.join(root, name))]
+        for name in dirs:
+            os.chmod(os.path.join(root, name), 0o777)
+        for name in files:
+            target = os.path.join(root, name)
+            if not os.path.islink(target):
+                os.chmod(target, 0o755)
+    os.chmod(path, 0o777)
+
+
 def init_bin_path():
     """Verify BIN_PATH exists and set up PATH + permissions."""
     if not os.path.isdir(BIN_PATH):
@@ -62,7 +103,7 @@ def init_bin_path():
         sys.exit()
 
     os.environ["PATH"] += os.pathsep + BIN_PATH
-    change_permissions_recursive(BIN_PATH, 0o777)
+    _normalize_bin_permissions(BIN_PATH)
 
     for prog in V.programs:
         if not shutil.which(prog):
@@ -113,11 +154,12 @@ def get_dir_size(ddir, max_=1.06):
     size = 0
     for (root, dirs, files) in os.walk(ddir):
         for name in files:
-            if not os.path.islink(name):
+            file_path = os.path.join(root, name)
+            if not os.path.islink(file_path):
                 try:
-                    size += os.path.getsize(os.path.join(root, name))
-                except:
-                    pass
+                    size += os.path.getsize(file_path)
+                except OSError:
+                    continue
     return int(size * max_)
 
 
@@ -167,6 +209,3 @@ def findfile(file, dir_) -> str:
     for root, dirs, files in os.walk(dir_, topdown=True):
         if file in files:
             return root + os.sep + file
-
-# Initialize the shared runtime tool path before format modules use it.
-init_bin_path()

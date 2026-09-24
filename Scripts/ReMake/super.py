@@ -39,7 +39,8 @@ def repack_super(selected_parts, super_type, super_sparse):
         for name, path in selected_parts:
             if is_sparse_image(path):
                 display(f'转换 sparse: {os.path.basename(path)} ...')
-                raw = sparse_to_raw(path)
+                raw_path = os.path.join(V.workspace, f'.{os.path.basename(path)}.raw.img')
+                raw = sparse_to_raw(path, raw_path, temp_dir=V.workspace)
                 if not raw or not os.path.isfile(raw):
                     print(f'> 无法转换 sparse 镜像: {path}')
                     return
@@ -77,7 +78,8 @@ def repack_super(selected_parts, super_type, super_sparse):
                 if os.path.isfile(b_path):
                     if is_sparse_image(b_path):
                         display(f'转换 sparse: {os.path.basename(b_path)} ...')
-                        b_raw = sparse_to_raw(b_path)
+                        b_raw_path = os.path.join(V.workspace, f'.{os.path.basename(b_path)}.raw.img')
+                        b_raw = sparse_to_raw(b_path, b_raw_path, temp_dir=V.workspace)
                         if b_raw and os.path.isfile(b_raw):
                             b_path = b_raw
                     size_b = os.path.getsize(b_path)
@@ -124,8 +126,8 @@ def repack_super(selected_parts, super_type, super_sparse):
 
     if super_sparse == 1:
         try:
-            raw_to_sparse(lpmake_output, super_output)
-        except Exception as error:
+            raw_to_sparse(lpmake_output, super_output, temp_dir=V.out)
+        except (OSError, ValueError) as error:
             print(f'> raw 转 sparse 失败: {error}')
             return
         finally:

@@ -132,7 +132,7 @@ def _sdat2img_main(transfer_list_file, new_data_file, output_image_file):
                         _write_zeroes(output, block_count)
             output.truncate(largest_block * BLOCK_SIZE)
             output.flush()
-    except Exception:
+    except (OSError, ValueError, SdatError):
         try:
             output_path.unlink(missing_ok=True)
         except OSError:

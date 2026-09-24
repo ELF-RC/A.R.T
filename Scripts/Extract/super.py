@@ -7,7 +7,7 @@ from pathlib import Path
 from Scripts.Primary.Utils import V
 from Scripts.Primary.Console import display
 from Scripts.Primary.WorkSpace import workspace_partition
-from Scripts.Primary.SuperTools import LpUnpack, unpack
+from Scripts.Primary.SuperTools import LpUnpack, LpUnpackError, unpack
 
 
 # Normalize logical-partition image names before recursion.
@@ -114,8 +114,8 @@ def extract_super(working_source, partition):
     display(f'正在分解: {os.path.basename(working_source)} <super>', 3)
     super_dir = os.path.join(V.workspace, 'super') + os.sep
     try:
-        unpack(working_source, super_dir)
-    except (Exception, SystemExit) as error:
+        unpack(working_source, super_dir, temp_dir=super_dir)
+    except (LpUnpackError, OSError, ValueError, SystemExit) as error:
         print(f'> super 分解失败: {error}')
         return False
 
@@ -184,8 +184,8 @@ def _human_size(b):
 # Read metadata for the selective extraction screen.
 def _list_partitions(super_img_path):
     """Parse super metadata and return (sorted_partition_info, effective_img_path)."""
-    job = LpUnpack(SUPER_IMAGE=super_img_path, SHOW_INFO=False)
-    effective_path = job._super_image
+    job = LpUnpack(SUPER_IMAGE=super_img_path, SHOW_INFO=False, TEMP_DIR=V.workspace)
+    effective_path = super_img_path
     job._fd.seek(0)
     metadata = job._read_metadata()
     result = []
@@ -199,7 +199,7 @@ def _list_partitions(super_img_path):
         if 0 <= p.group_index < len(metadata.groups):
             group = metadata.groups[p.group_index].name
         result.append((p.name, group, size))
-    job._fd.close()
+    job.close()
     result.sort(key=lambda x: (-x[2], x[0]))  # Sort by size descending, then by name.
     return result, effective_path
 
@@ -267,10 +267,11 @@ def _extract_selected(super_img_path, out_dir, partitions, selected_indices):
             OUTPUT_DIR=out_dir,
             NAME=names,
             SHOW_INFO=False,
+            TEMP_DIR=V.workspace,
         )
         job.unpack()
         print(f'\n{GREEN}> 提取完成！文件已输出到 {out_dir}{CLOSE}\n')
-    except Exception as e:
+    except (LpUnpackError, OSError, ValueError) as e:
         print(f'{RED}> 提取失败: {e}{CLOSE}')
 
 

@@ -493,10 +493,9 @@ class Metadata:
                 ],
                 "partition_layout": self._get_partition_layout()
             }
-        except Exception:
-            ...
-        finally:
-            return result
+        except (IndexError, KeyError, AttributeError, TypeError, ValueError) as error:
+            raise LpUnpackError(f'Invalid super metadata: {error}') from error
+        return result
 
     def to_json(self) -> str:
         data = self._get_info()
@@ -583,14 +582,30 @@ class LpUnpack:
         self._config = kwargs.get('CONFIG', None)
         self._slot_num = None
         super_image = kwargs.get('SUPER_IMAGE')
+        raw_path = None
         if is_sparse_image(super_image):
             print('Sparse image detected.')
             print('Process conversion to non sparse image...')
-            super_image = sparse_to_raw(super_image)
+            temp_dir = kwargs.get("TEMP_DIR") or kwargs.get("OUTPUT_DIR") or os.path.dirname(os.path.abspath(super_image))
+            os.makedirs(temp_dir, exist_ok=True)
+            raw_name = f".{os.path.basename(super_image)}.unsparse.img"
+            raw_path = os.path.join(temp_dir, raw_name)
+            super_image = sparse_to_raw(super_image, raw_path, temp_dir=temp_dir)
             print('Result:[ok]')
         self._super_image = super_image
+        self._temporary_super_image = raw_path
         self._fd: BinaryIO = open(super_image, 'rb')
         self._out_dir = kwargs.get('OUTPUT_DIR', None)
+
+    def close(self):
+        if not self._fd.closed:
+            self._fd.close()
+        if self._temporary_super_image:
+            try:
+                os.remove(self._temporary_super_image)
+            except OSError:
+                pass
+            self._temporary_super_image = None
 
     def _check_out_dir_exists(self):
         if self._out_dir is None:
@@ -648,24 +663,19 @@ class LpUnpack:
 
     def _read_metadata_header(self, metadata: Metadata):
         offsets = metadata.get_offsets()
-        for index, offset in enumerate(offsets):
+        for offset in offsets:
             self._fd.seek(offset, io.SEEK_SET)
             header = LpMetadataHeader(self._fd.read(80))
             header.partitions = LpMetadataTableDescriptor(self._fd.read(12))
             header.extents = LpMetadataTableDescriptor(self._fd.read(12))
             header.groups = LpMetadataTableDescriptor(self._fd.read(12))
             header.block_devices = LpMetadataTableDescriptor(self._fd.read(12))
-
             if header.magic != LP_METADATA_HEADER_MAGIC:
-                check_index = index + 1
-                if check_index > len(offsets):
-                    raise LpUnpackError('Logical partition metadata has invalid magic value.')
-                else:
-                    print(f'Read Backup header by offset 0x{offsets[check_index]:x}')
-                    continue
-
+                continue
             metadata.header = header
             self._fd.seek(offset + header.header_size, io.SEEK_SET)
+            return
+        raise LpUnpackError('Logical partition metadata has invalid magic value.')
 
     def _read_metadata(self):
         self._fd.seek(LP_PARTITION_RESERVED_BYTES, io.SEEK_SET)
@@ -716,11 +726,16 @@ class LpUnpack:
         return metadata
 
     def _read_primary_geometry(self) -> LpMetadataGeometry:
-        geometry = LpMetadataGeometry(self._fd.read(LP_METADATA_GEOMETRY_SIZE))
-        if geometry is not None:
-            return geometry
-        else:
-            return LpMetadataGeometry(self._fd.read(LP_METADATA_GEOMETRY_SIZE))
+        candidates = []
+        for _ in range(2):
+            buffer = self._fd.read(LP_METADATA_GEOMETRY_SIZE)
+            if len(buffer) != LP_METADATA_GEOMETRY_SIZE:
+                break
+            candidates.append(LpMetadataGeometry(buffer))
+        for geometry in candidates:
+            if geometry.magic == LP_METADATA_GEOMETRY_MAGIC:
+                return geometry
+        raise LpUnpackError('Logical partition metadata has invalid geometry magic signature.')
 
     def _write_extent_to_file(self, fd: IO, offset: int, size: int, block_size: int):
         self._fd.seek(offset)
@@ -749,7 +764,7 @@ class LpUnpack:
         except LpUnpackError:
             raise
         finally:
-            self._fd.close()
+            self.close()
 
     def unpack(self):
         try:
@@ -787,12 +802,12 @@ class LpUnpack:
         except LpUnpackError:
             raise
         finally:
-            self._fd.close()
+            self.close()
 
 
 # Programmatic super unpack facade.
-def unpack(file: str, out: str, parts: list = None):
-    namespace = argparse.Namespace(SUPER_IMAGE=file, OUTPUT_DIR=out, SHOW_INFO=False, NAME=parts)
+def unpack(file: str, out: str, parts: list = None, temp_dir: str = None):
+    namespace = argparse.Namespace(SUPER_IMAGE=file, OUTPUT_DIR=out, SHOW_INFO=False, NAME=parts, TEMP_DIR=temp_dir)
     if not os.path.exists(namespace.SUPER_IMAGE):
         raise FileNotFoundError(f"{namespace.SUPER_IMAGE} Cannot Find")
     else:

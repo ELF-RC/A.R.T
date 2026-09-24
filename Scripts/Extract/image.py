@@ -58,7 +58,7 @@ def decompress_img(source, distance=None, keep=1):
             _, staged_partition, staged_config = create_partition_stage(partition, 'boot-extract')
             if not boot_unpack(working_source, str(staged_partition)):
                 raise LayoutError(f'{partition} boot 解包失败')
-            if not (os.path.join(staged_partition, 'boot_o.img')):
+            if not os.path.isfile(os.path.join(staged_partition, 'boot_o.img')):
                 raise LayoutError(f'{partition} boot 解包未生成 boot_o.img')
             metadata_path(staged_config, partition, '_kernel.txt').touch()
             committed = _commit_extracted_partition(
@@ -68,13 +68,15 @@ def decompress_img(source, distance=None, keep=1):
 
     elif file_type == 'sparse':
         from Scripts.Primary.ImageTools import sparse_to_raw
+        raw_source = os.path.join(V.workspace, f'.{partition}.unsparse.img')
         try:
-            raw_source = sparse_to_raw(working_source)
-        except Exception as error:
-            print(f'> Sparse 转换失败: {error}')
-            raw_source = None
-        if raw_source:
+            sparse_to_raw(working_source, raw_source, temp_dir=V.workspace)
             decompress_img(raw_source, destination)
+        except (OSError, ValueError) as error:
+            print(f'> Sparse 转换失败: {error}')
+        finally:
+            if os.path.isfile(raw_source):
+                os.remove(raw_source)
         return
 
     elif file_type == 'ext':
@@ -167,7 +169,7 @@ def extract_zrom(rom):
         V.project = 'DNA_' + os.path.basename(rom).rsplit('.', 1)[0]
         try:
             envelop_project()
-        except (LayoutError, Exception) as error:
+        except (LayoutError, OSError, ValueError) as error:
             input(f'> 无法创建或打开工程: {error}')
             return
 

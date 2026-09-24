@@ -3,6 +3,7 @@
 import os
 import struct
 import tempfile
+from pathlib import Path
 
 # Android sparse-image conversion
 # ---------------------------------------------------------------------------
@@ -28,8 +29,8 @@ def _sparse_default_path(source, suffix):
     path = Path(os.fspath(source))
     return str(path.with_suffix(suffix))
 
-def _sparse_temp_file(destination):
-    parent = os.path.dirname(os.path.abspath(destination)) or os.curdir
+def _sparse_temp_file(destination, temp_dir=None):
+    parent = os.fspath(temp_dir) if temp_dir is not None else (os.path.dirname(os.path.abspath(destination)) or os.curdir)
     os.makedirs(parent, exist_ok=True)
     return tempfile.mkstemp(
         prefix=f'.{os.path.basename(destination)}.',
@@ -38,7 +39,7 @@ def _sparse_temp_file(destination):
     )
 
 # Expand sparse chunks into a raw image.
-def sparse_to_raw(source, destination=None):
+def sparse_to_raw(source, destination=None, temp_dir=None):
     """Expand an Android sparse image to a raw image and return its path.
 
     The conversion is implemented here so extraction and repacking share the
@@ -71,7 +72,7 @@ def sparse_to_raw(source, destination=None):
                 raise ValueError(f'sparse 镜像{description}被截断: {source}')
             remaining -= len(data)
 
-    temp_fd, temp_path = _sparse_temp_file(destination)
+    temp_fd, temp_path = _sparse_temp_file(destination, temp_dir)
     try:
         with open(source, 'rb') as image, os.fdopen(temp_fd, 'wb') as raw:
             header = struct.unpack(
@@ -143,7 +144,7 @@ def sparse_to_raw(source, destination=None):
                 raise ValueError(f'sparse 镜像逻辑大小与文件头不一致: {source}')
             raw.truncate(expected_size)
         os.replace(temp_path, destination)
-    except Exception:
+    except (OSError, ValueError, struct.error):
         try:
             os.close(temp_fd)
         except OSError:
@@ -156,7 +157,7 @@ def sparse_to_raw(source, destination=None):
     return destination
 
 # Encode raw blocks as DONT_CARE, FILL, or RAW sparse chunks.
-def raw_to_sparse(source, destination=None, block_size=4096):
+def raw_to_sparse(source, destination=None, block_size=4096, temp_dir=None):
     """Convert a raw image to Android sparse format and return its path.
 
     Zero blocks become DONT_CARE chunks; repeated four-byte blocks become
@@ -185,7 +186,7 @@ def raw_to_sparse(source, destination=None, block_size=4096):
             return SPARSE_CHUNK_FILL, pattern
         return SPARSE_CHUNK_RAW, None
 
-    temp_fd, temp_path = _sparse_temp_file(destination)
+    temp_fd, temp_path = _sparse_temp_file(destination, temp_dir)
     try:
         with open(source, 'rb') as image, os.fdopen(temp_fd, 'w+b') as sparse:
             sparse.write(b'\x00' * SPARSE_HEADER_SIZE)
@@ -267,7 +268,7 @@ def raw_to_sparse(source, destination=None, block_size=4096):
             ))
             sparse.seek(end, os.SEEK_SET)
         os.replace(temp_path, destination)
-    except Exception:
+    except (OSError, ValueError, struct.error):
         try:
             os.close(temp_fd)
         except OSError:

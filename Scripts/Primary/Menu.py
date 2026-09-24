@@ -107,7 +107,7 @@ def menu_once():
                 if not which.isdigit():
                     continue
                 elif int(which) > 0:
-                    if int(which) < len(V.dict0):
+                    if int(which) in V.dict0:
                         if input(
                                 f"\x1b[0;31m> 是否删除 \x1b[0;34mNo.{which} \x1b[0;31m工程: \x1b[0;32m{os.path.basename(V.dict0[int(which)])}\x1b[0;31m [0/1]:\x1b[0m ") == "1":
                             if os.path.isdir(V.dict0[int(which)]):
@@ -125,7 +125,7 @@ def menu_once():
             if creat_project():
                 menu_main()
             continue
-        elif 0 < int(choice) < len(V.dict0):
+        elif int(choice) in V.dict0 and int(choice) != 0:
             V.project = V.dict0[int(choice)]
             try:
                 envelop_project()
@@ -217,9 +217,9 @@ def menu_modules():
         elif int(choice) == 44:
             if V.dict0:
                 which = input("> 输入序号进行删除: ")
-                if int(which) == 0 or not which.isdigit():
+                if not which.isdigit() or int(which) == 0:
                     continue
-                if int(which) <= len(V.dict0):
+                if int(which) in V.dict0:
                     if input(
                             f"\x1b[0;31m> 是否删除 \x1b[0;34mNo.{which} \x1b[0;31m插件: \x1b[0;32m{os.path.basename(V.dict0[int(which)])}\x1b[0;31m [0/1]:\x1b[0m ") == "1":
                         if os.path.isdir(V.dict0[int(which)]):
@@ -229,7 +229,7 @@ def menu_modules():
                             input(f"> Number {which} Error !")
         elif int(choice) == 0:
             return
-        if 0 < int(choice) < len(V.dict0):
+        if int(choice) in V.dict0 and int(choice) != 0:
             os.system("clear")
             print(f"\x1b[1;31m> 执行插件:\x1b[0m {os.path.basename(V.dict0[int(choice)])}\n")
             if os.path.isfile(shell_sub := (V.dict0[int(choice)] + os.sep + "run.sh")):

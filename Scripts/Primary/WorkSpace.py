@@ -13,15 +13,13 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from Scripts.Primary.Utils import PWD_DIR, V, get_dir_size, ceil
+from Scripts.Primary.Utils import LayoutError, PWD_DIR, V, get_dir_size, ceil
 
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Layout errors
 # ═══════════════════════════════════════════════════════════════════════
 
-class LayoutError(RuntimeError):
-    """Base error for invalid A.R.T project layouts."""
 
 
 class UnsupportedLayoutError(LayoutError):

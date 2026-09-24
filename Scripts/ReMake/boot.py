@@ -18,7 +18,7 @@ def dboot(infile, dist):
         new_cpio = os.path.join(infile, "ramdisk-new.cpio")
         try:
             os.chdir(infile + os.sep + "ramdisk")
-        except Exception as e:
+        except OSError as e:
             print("Ramdisk Not Found.. %s" % e)
             return
         busybox = findfile('busybox', BIN_PATH).replace('\\', "/")
