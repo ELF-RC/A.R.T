@@ -67,7 +67,7 @@ jobs:
             --verbose-output=nuitka-build.log \
             --onefile-no-compression \
             --static-libpython=yes \
-            art.py 2>&1 | tee nuitka-stdout.log
+            Scripts/main.py 2>&1 | tee nuitka-stdout.log
 
       - name: Collect logs
         if: always()

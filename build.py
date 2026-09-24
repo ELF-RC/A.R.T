@@ -85,7 +85,7 @@ def main() -> None:
     log_file = ROOT / 'build-call.log'
     result = subprocess.run(
         [sys.executable, '-m', 'PyInstaller',
-         str(ROOT / 'art.py'),
+         str(ROOT / 'Scripts' / 'main.py'),
          '--onefile',
          '--name', 'art',
          '--distpath', str(DIST_DIR),
