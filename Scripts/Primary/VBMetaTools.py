@@ -16,12 +16,6 @@ CLOSE = '\x1b[0m'
 AVBTOOL = os.path.join(BIN_PATH, "avbtool")
 
 
-def _parallel_args():
-    """Return --parallel N, capping thread count at 32."""
-    workers = min(os.cpu_count() or 1, 32)
-    return ['--parallel', str(workers)]
-
-
 # AVB command execution and signing-key path helpers.
 def _run(args):
     """Run avbtool, print output, return True on success."""
@@ -108,12 +102,6 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         input('> 按回车继续')
         return
 
-    # Guard: avbtool requires partition images to be 4096-byte aligned.
-    from Scripts.Primary.ImageTools import align_4k_check_and_error
-    if not align_4k_check_and_error(img):
-        input('> 按回车继续')
-        return
-
     # Copy the original to x_signed.img and operate on the copy.
     base, ext = os.path.splitext(img)
     out_img = f'{base}_signed{ext}'
@@ -138,42 +126,32 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
     pass_path = _pass_file_path()
     # partition_size: use the user value, or calculate it automatically.
     ps_input = input('  分区大小（字节），留空自动计算 >> ').strip()
+    import math
     if ps_input:
         v = int(ps_input)
         aligned_ps = str(v) if v % 4096 == 0 else str((v + 4095) // 4096 * 4096)
     elif cmd_name == 'add_hashtree_footer':
-        # Auto-calc: partition_size must hold image + hashtree + FEC metadata.
-        # avbtool --calc_max_image_size returns the max image that fits a given
-        # partition_size.  When that value is < img_size we grow the partition
-        # by exactly the deficit (img_size - max_img) and re-query, up to 3 rounds.
+        # Estimate using the --calc_max_image_size ratio.
         trial_ps = (img_size + 64 * 1024 * 1024 + 4095) // 4096 * 4096
-
-        def _calc_max(PS):
-            """Return the max image size that fits PS, or None if avbtool fails."""
-            res = subprocess.run([AVBTOOL, 'add_hashtree_footer',
-                '--image', out_img, '--partition_name', part_name,
-                '--algorithm', 'SHA256_RSA4096', '--key', key_path,
-                '--partition_size', str(PS)] +
-                (['--pass-file', pass_path] if pass_path else []) +
-                _parallel_args() +
-                ['--calc_max_image_size'],
-                capture_output=True, text=True)
-            out = res.stdout.strip()
-            return int(out) if out.isdigit() else None
-
-        aligned_ps = trial_ps
-        for _ in range(3):
-            max_img = _calc_max(aligned_ps)
-            if max_img is None:
-                # avbtool failed (disk full, I/O error...): stop and use the
-                # current estimate instead of scaling it up on bad data.
-                break
-            if max_img >= img_size:
-                break
-            deficit = img_size - max_img
-            aligned_ps = (aligned_ps + deficit + 4095) // 4096 * 4096
-        aligned_ps = str(aligned_ps)
-        print(f'  [auto] partition_size = {aligned_ps} bytes')
+        r = subprocess.run([AVBTOOL, 'add_hashtree_footer',
+            '--image', out_img, '--partition_name', part_name,
+            '--algorithm', 'SHA256_RSA4096', '--key', key_path,
+            '--partition_size', str(trial_ps)] +
+            (['--pass-file', pass_path] if pass_path else []) +
+            ['--calc_max_image_size'],
+            capture_output=True, text=True)
+        max_img = int(r.stdout.strip()) if r.stdout.strip().isdigit() else 0
+        aligned_ps = str(math.ceil(img_size / max_img * trial_ps / 4096) * 4096)
+        r2 = subprocess.run([AVBTOOL, 'add_hashtree_footer',
+            '--image', out_img, '--partition_name', part_name,
+            '--algorithm', 'SHA256_RSA4096', '--key', key_path,
+            '--partition_size', aligned_ps] +
+            (['--pass-file', pass_path] if pass_path else []) +
+            ['--calc_max_image_size'],
+            capture_output=True, text=True)
+        max_img2 = int(r2.stdout.strip()) if r2.stdout.strip().isdigit() else 0
+        if max_img2 < img_size:
+            aligned_ps = str(math.ceil(img_size / max_img2 * int(aligned_ps) / 4096) * 4096)
     else:
         aligned_ps = str((img_size + 69632 + 4095) // 4096 * 4096)
 
@@ -183,9 +161,6 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
             '--partition_size', aligned_ps]
     if pass_path:
         args.extend(['--pass-file', pass_path])
-    # --parallel is only supported by add_hashtree_footer.
-    if cmd_name == 'add_hashtree_footer':
-        args.extend(_parallel_args())
     # rollback_index: prompt for hash footer; omit it for hashtree footer.
     if cmd_name == 'add_hash_footer':
         rollback = input('  回滚索引（默认0）>> ').strip() or '0'
