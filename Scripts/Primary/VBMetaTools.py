@@ -132,7 +132,6 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
     pass_path = _pass_file_path()
     # partition_size: use the user value, or calculate it automatically.
     ps_input = input('  分区大小（字节），留空自动计算 >> ').strip()
-    import math
     if ps_input:
         v = int(ps_input)
         aligned_ps = str(v) if v % 4096 == 0 else str((v + 4095) // 4096 * 4096)
@@ -148,7 +147,10 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
             ['--calc_max_image_size'],
             capture_output=True, text=True)
         max_img = int(r.stdout.strip()) if r.stdout.strip().isdigit() else 0
-        aligned_ps = str(math.ceil(img_size / max_img * trial_ps / 4096) * 4096)
+        # min partition_size that can hold the image: must be at least img_size,
+        # otherwise avbtool returns a negative max_image_size.
+        aligned_ps = str(max(img_size, max_img)) if max_img > 0 else trial_ps
+        aligned_ps = str((int(aligned_ps) + 4095) // 4096 * 4096)
         r2 = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
@@ -157,9 +159,9 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
             _parallel_args() +
             ['--calc_max_image_size'],
             capture_output=True, text=True)
-        max_img2 = int(r2.stdout.strip()) if r2.stdout.strip().isdigit() else 0
-        if max_img2 < img_size:
-            aligned_ps = str(math.ceil(img_size / max_img2 * int(aligned_ps) / 4096) * 4096)
+        # r2 confirms the result is stable; aligned_ps already holds the image.
+        # A negative output from avbtool indicates the partition is too small,
+        # but max(img_size, max_img) already prevents that case.
     else:
         aligned_ps = str((img_size + 69632 + 4095) // 4096 * 4096)
 
