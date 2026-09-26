@@ -136,8 +136,8 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         r = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
-            '--partition_size', str(trial_ps),
-            '--do_not_generate_fec'] + (['--pass-file', pass_path] if pass_path else []) +
+            '--partition_size', str(trial_ps)] +
+            (['--pass-file', pass_path] if pass_path else []) +
             ['--calc_max_image_size'],
             capture_output=True, text=True)
         max_img = int(r.stdout.strip()) if r.stdout.strip().isdigit() else 0
@@ -145,8 +145,8 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         r2 = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
-            '--partition_size', aligned_ps,
-            '--do_not_generate_fec'] + (['--pass-file', pass_path] if pass_path else []) +
+            '--partition_size', aligned_ps] +
+            (['--pass-file', pass_path] if pass_path else []) +
             ['--calc_max_image_size'],
             capture_output=True, text=True)
         max_img2 = int(r2.stdout.strip()) if r2.stdout.strip().isdigit() else 0
@@ -159,8 +159,6 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
     args = [cmd_name, '--image', out_img, '--partition_name', part_name,
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
             '--partition_size', aligned_ps]
-    if cmd_name == 'add_hashtree_footer':
-        args.append('--do_not_generate_fec')
     if pass_path:
         args.extend(['--pass-file', pass_path])
     # rollback_index: prompt for hash footer; omit it for hashtree footer.
