@@ -21,7 +21,9 @@ def main():
         print()
         print(f'  {CYAN}[02]{CLOSE}\t镜像签名与VBMeta工具')
         print()
-        VALID = {'00', '0', '01', '1', '02', '2'}
+        print(f'  {GREEN}[03]{CLOSE}\t镜像4096对齐')
+        print()
+        VALID = {'00', '0', '01', '1', '02', '2', '03', '3'}
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
         if choice not in VALID:
             input(f'> 无效序号: {choice}')
@@ -35,6 +37,10 @@ def main():
         elif choice in ('02', '2'):
             from Scripts.Primary import VBMetaTools
             VBMetaTools.main()
+            input('> 任意键继续')
+        elif choice in ('03', '3'):
+            from Scripts.Primary import ImageTools
+            ImageTools.align_image_4k()
             input('> 任意键继续')
         else:
             input(f'> 无效序号: {choice}')

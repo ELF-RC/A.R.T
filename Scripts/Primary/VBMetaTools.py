@@ -108,6 +108,12 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         input('> 按回车继续')
         return
 
+    # Guard: avbtool requires partition images to be 4096-byte aligned.
+    from Scripts.Primary.ImageTools import align_4k_check_and_error
+    if not align_4k_check_and_error(img):
+        input('> 按回车继续')
+        return
+
     # Copy the original to x_signed.img and operate on the copy.
     base, ext = os.path.splitext(img)
     out_img = f'{base}_signed{ext}'
