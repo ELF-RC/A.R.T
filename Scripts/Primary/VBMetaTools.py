@@ -16,11 +16,17 @@ CLOSE = '\x1b[0m'
 AVBTOOL = os.path.join(BIN_PATH, "avbtool")
 
 
+def _parallel_args():
+    """Return --parallel N, capping thread count at 32."""
+    workers = min(os.cpu_count() or 1, 32)
+    return ['--parallel', str(workers)]
+
+
 # AVB command execution and signing-key path helpers.
 def _run(args):
     """Run avbtool, print output, return True on success."""
     result = subprocess.run(
-        [AVBTOOL] + args,
+        [AVBTOOL] + args + _parallel_args(),
         capture_output=True,
         text=True,
     )
@@ -138,6 +144,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
             '--partition_size', str(trial_ps)] +
             (['--pass-file', pass_path] if pass_path else []) +
+            _parallel_args() +
             ['--calc_max_image_size'],
             capture_output=True, text=True)
         max_img = int(r.stdout.strip()) if r.stdout.strip().isdigit() else 0
@@ -147,6 +154,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
             '--partition_size', aligned_ps] +
             (['--pass-file', pass_path] if pass_path else []) +
+            _parallel_args() +
             ['--calc_max_image_size'],
             capture_output=True, text=True)
         max_img2 = int(r2.stdout.strip()) if r2.stdout.strip().isdigit() else 0
@@ -205,7 +213,7 @@ def cmd_verify_image():
     # Omit --key so avbtool extracts the public key from the image for verification.
     # Avoid compatibility issues where newer avbtool cannot read avb_pkmd.bin with OpenSSL 3.x.
     result = subprocess.run(
-        [AVBTOOL, 'verify_image', '--image', img],
+        [AVBTOOL, 'verify_image', '--image', img] + _parallel_args(),
         capture_output=True, text=True,
     )
     output = result.stdout + result.stderr
