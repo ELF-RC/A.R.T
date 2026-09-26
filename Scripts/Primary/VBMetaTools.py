@@ -167,6 +167,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
                 break
             deficit = img_size - max_img
             aligned_ps = (aligned_ps + deficit + 4095) // 4096 * 4096
+        aligned_ps = str(aligned_ps)
         print(f'  [auto] partition_size = {aligned_ps} bytes')
     else:
         aligned_ps = str((img_size + 69632 + 4095) // 4096 * 4096)
