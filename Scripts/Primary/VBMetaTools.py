@@ -142,32 +142,32 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         v = int(ps_input)
         aligned_ps = str(v) if v % 4096 == 0 else str((v + 4095) // 4096 * 4096)
     elif cmd_name == 'add_hashtree_footer':
-        # Estimate using the --calc_max_image_size ratio.
+        # Auto-calc: partition_size must hold image + hashtree + FEC metadata.
+        # avbtool --calc_max_image_size returns the max image that fits a given
+        # partition_size.  When that value is < img_size we grow the partition
+        # by exactly the deficit (img_size - max_img) and re-query, up to 3 rounds.
         trial_ps = (img_size + 64 * 1024 * 1024 + 4095) // 4096 * 4096
-        r = subprocess.run([AVBTOOL, 'add_hashtree_footer',
-            '--image', out_img, '--partition_name', part_name,
-            '--algorithm', 'SHA256_RSA4096', '--key', key_path,
-            '--partition_size', str(trial_ps)] +
-            (['--pass-file', pass_path] if pass_path else []) +
-            _parallel_args() +
-            ['--calc_max_image_size'],
-            capture_output=True, text=True)
-        max_img = int(r.stdout.strip()) if r.stdout.strip().isdigit() else 0
-        # min partition_size that can hold the image: must be at least img_size,
-        # otherwise avbtool returns a negative max_image_size.
-        aligned_ps = str(max(img_size, max_img)) if max_img > 0 else trial_ps
-        aligned_ps = str((int(aligned_ps) + 4095) // 4096 * 4096)
-        r2 = subprocess.run([AVBTOOL, 'add_hashtree_footer',
-            '--image', out_img, '--partition_name', part_name,
-            '--algorithm', 'SHA256_RSA4096', '--key', key_path,
-            '--partition_size', aligned_ps] +
-            (['--pass-file', pass_path] if pass_path else []) +
-            _parallel_args() +
-            ['--calc_max_image_size'],
-            capture_output=True, text=True)
-        # r2 confirms the result is stable; aligned_ps already holds the image.
-        # A negative output from avbtool indicates the partition is too small,
-        # but max(img_size, max_img) already prevents that case.
+
+        def _calc_max(PS):
+            res = subprocess.run([AVBTOOL, 'add_hashtree_footer',
+                '--image', out_img, '--partition_name', part_name,
+                '--algorithm', 'SHA256_RSA4096', '--key', key_path,
+                '--partition_size', str(PS)] +
+                (['--pass-file', pass_path] if pass_path else []) +
+                _parallel_args() +
+                ['--calc_max_image_size'],
+                capture_output=True, text=True)
+            out = res.stdout.strip()
+            return int(out) if out.isdigit() else 0
+
+        aligned_ps = trial_ps
+        for _ in range(3):
+            max_img = _calc_max(aligned_ps)
+            if max_img >= img_size:
+                break
+            deficit = img_size - max_img
+            aligned_ps = (aligned_ps + deficit + 4095) // 4096 * 4096
+        print(f'  [auto] partition_size = {aligned_ps} bytes')
     else:
         aligned_ps = str((img_size + 69632 + 4095) // 4096 * 4096)
 
