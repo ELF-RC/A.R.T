@@ -310,7 +310,7 @@ def menu_main():
             continue
         elif int(option) == 12:
             from Scripts.Primary import More
-            more.main()
+            More.main()
             continue
         elif int(option) in [9, 10, 11]:
             quiet()
