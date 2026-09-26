@@ -149,6 +149,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         trial_ps = (img_size + 64 * 1024 * 1024 + 4095) // 4096 * 4096
 
         def _calc_max(PS):
+            """Return the max image size that fits PS, or None if avbtool fails."""
             res = subprocess.run([AVBTOOL, 'add_hashtree_footer',
                 '--image', out_img, '--partition_name', part_name,
                 '--algorithm', 'SHA256_RSA4096', '--key', key_path,
@@ -158,11 +159,15 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
                 ['--calc_max_image_size'],
                 capture_output=True, text=True)
             out = res.stdout.strip()
-            return int(out) if out.isdigit() else 0
+            return int(out) if out.isdigit() else None
 
         aligned_ps = trial_ps
         for _ in range(3):
             max_img = _calc_max(aligned_ps)
+            if max_img is None:
+                # avbtool failed (disk full, I/O error...): stop and use the
+                # current estimate instead of scaling it up on bad data.
+                break
             if max_img >= img_size:
                 break
             deficit = img_size - max_img
