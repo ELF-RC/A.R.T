@@ -7,7 +7,7 @@ from pathlib import Path
 from Scripts.Primary.Utils import V
 from Scripts.Primary.Console import display
 from Scripts.Primary.WorkSpace import workspace_partition
-from Scripts.Primary.SuperTools import LpUnpack, LpUnpackError, unpack
+from Scripts.Primary.SuperTools import LpUnpack, LpUnpackError, _SparseRawCache, unpack
 
 
 # Normalize logical-partition image names before recursion.
@@ -316,6 +316,9 @@ def super_selective_main():
 
     if selected:
         _extract_selected(effective_path, out_dir, partitions, selected)
+
+    # Clean up any shared sparse→raw temp files created during this session.
+    _SparseRawCache.cleanup_all()
 
 
 

@@ -554,6 +554,59 @@ class LpUnpackError(Exception):
         return self.message
 
 
+class _SparseRawCache:
+    """Track sparse→raw temp files so multiple LpUnpack instances share
+    the same raw image instead of converting it repeatedly.
+
+    acquire() registers a raw_path for a given source. If the source already
+    has a registered path, that path is returned (the raw file must still
+    exist on disk). Otherwise raw_path is registered as the new shared path.
+
+    release() unregisters the source WITHOUT deleting the file. This allows
+    the next LpUnpack instance to reuse the same raw file.
+
+    cleanup_all() deletes all remaining raw files and clears the registry.
+    Call it at the end of the entry-point function (e.g. super_selective_main).
+    """
+    _entries: dict = {}  # source_abs -> raw_path
+
+    @classmethod
+    def acquire(cls, source_abs, raw_path):
+        """Return the shared raw path for source_abs, registering it if new."""
+        if source_abs in cls._entries:
+            return cls._entries[source_abs]
+        cls._entries[source_abs] = raw_path
+        return raw_path
+
+    @classmethod
+    def release(cls, source_abs):
+        """Unregister source_abs.
+
+        The raw file remains on disk so that a subsequent LpUnpack instance
+        can reuse it via acquire() (which checks _entries before deciding
+        whether to convert). cleanup_all() at the end of the entry point
+        deletes the file and clears _entries.
+
+        Note: release() intentionally does NOT pop from _entries, so that
+        cleanup_all() can still find and delete the file.
+        """
+        pass
+
+    @classmethod
+    def cleanup_all(cls):
+        """Delete all cached raw files and clear the registry.
+
+        Must be called at the end of the entry-point function
+        (e.g. super_selective_main) to remove temp files.
+        """
+        for raw_path in list(cls._entries.values()):
+            try:
+                os.remove(raw_path)
+            except OSError:
+                pass
+        cls._entries.clear()
+
+
 _SAFE_PARTITION_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*\Z')
 
 
@@ -581,19 +634,31 @@ class LpUnpack:
         self._show_info_format = kwargs.get('SHOW_INFO_FORMAT', FormatType.TEXT)
         self._config = kwargs.get('CONFIG', None)
         self._slot_num = None
-        super_image = kwargs.get('SUPER_IMAGE')
+        source = kwargs.get('SUPER_IMAGE')
+        super_image = source
         raw_path = None
-        if is_sparse_image(super_image):
-            print('Sparse image detected.')
-            print('Process conversion to non sparse image...')
-            temp_dir = kwargs.get("TEMP_DIR") or kwargs.get("OUTPUT_DIR") or os.path.dirname(os.path.abspath(super_image))
+        raw_cache_key = None
+        if is_sparse_image(source):
+            temp_dir = kwargs.get("TEMP_DIR") or kwargs.get("OUTPUT_DIR") or os.path.dirname(os.path.abspath(source))
             os.makedirs(temp_dir, exist_ok=True)
-            raw_name = f".{os.path.basename(super_image)}.unsparse.img"
+            raw_name = f".{os.path.basename(source)}.unsparse.img"
             raw_path = os.path.join(temp_dir, raw_name)
-            super_image = sparse_to_raw(super_image, raw_path, temp_dir=temp_dir)
-            print('Result:[ok]')
+            raw_cache_key = os.path.abspath(source)
+            # Reuse a shared raw file if another LpUnpack instance has
+            # already converted the same source; otherwise convert now.
+            if os.path.exists(raw_path):
+                print('Sparse image detected.')
+                print('Reusing cached non-sparse image...')
+            else:
+                print('Sparse image detected.')
+                print('Process conversion to non sparse image...')
+                sparse_to_raw(source, raw_path, temp_dir=temp_dir)
+                print('Result:[ok]')
+            raw_path = _SparseRawCache.acquire(raw_cache_key, raw_path)
+            super_image = raw_path
         self._super_image = super_image
         self._temporary_super_image = raw_path
+        self._raw_cache_key = raw_cache_key
         self._fd: BinaryIO = open(super_image, 'rb')
         self._out_dir = kwargs.get('OUTPUT_DIR', None)
 
@@ -601,10 +666,9 @@ class LpUnpack:
         if not self._fd.closed:
             self._fd.close()
         if self._temporary_super_image:
-            try:
-                os.remove(self._temporary_super_image)
-            except OSError:
-                pass
+            key = getattr(self, '_raw_cache_key', None)
+            if key is not None:
+                _SparseRawCache.release(key)
             self._temporary_super_image = None
 
     def _check_out_dir_exists(self):
