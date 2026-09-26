@@ -26,7 +26,7 @@ def _parallel_args():
 def _run(args):
     """Run avbtool, print output, return True on success."""
     result = subprocess.run(
-        [AVBTOOL] + args + _parallel_args(),
+        [AVBTOOL] + args,
         capture_output=True,
         text=True,
     )
@@ -169,6 +169,9 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
             '--partition_size', aligned_ps]
     if pass_path:
         args.extend(['--pass-file', pass_path])
+    # --parallel is only supported by add_hashtree_footer.
+    if cmd_name == 'add_hashtree_footer':
+        args.extend(_parallel_args())
     # rollback_index: prompt for hash footer; omit it for hashtree footer.
     if cmd_name == 'add_hash_footer':
         rollback = input('  回滚索引（默认0）>> ').strip() or '0'
@@ -213,7 +216,7 @@ def cmd_verify_image():
     # Omit --key so avbtool extracts the public key from the image for verification.
     # Avoid compatibility issues where newer avbtool cannot read avb_pkmd.bin with OpenSSL 3.x.
     result = subprocess.run(
-        [AVBTOOL, 'verify_image', '--image', img] + _parallel_args(),
+        [AVBTOOL, 'verify_image', '--image', img],
         capture_output=True, text=True,
     )
     output = result.stdout + result.stderr
