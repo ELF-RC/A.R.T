@@ -240,8 +240,29 @@ def _get_ota_parts(zip_path):
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+def _ask_fingerprints(replace_parts, new_parts):
+    """Ask the user for care-map fingerprint overrides.
+
+    The avbroot care map requires a com.android.build.<partition>.fingerprint
+    property descriptor in each partition's AVB metadata. Xiaomi images keep
+    these properties only in the top-level vbmeta, so the per-partition
+    descriptors are missing and the patch fails. Let the user supply a
+    fingerprint string per partition (any string is accepted).
+    """
+    overrides = []
+    part_names = [name for name, _ in replace_parts] + [name for name, _, _ in new_parts]
+    if not part_names:
+        return overrides
+    print(f'\n  care map 指纹（每分区一条，留空跳过）')
+    for name in part_names:
+        value = input(f'  --fingerprint {name} "<指纹>"（留空跳过）>> ').strip()
+        if value:
+            overrides.append((name, value))
+    return overrides
+
+
 # Build the avbroot OTA patch command.
-def _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names, disable_avb=False):
+def _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names, disable_avb=False, fingerprints=None):
     """Build common avbroot ota patch command parts.
 
     new_parts: list of (part_name, img_file_name, size_or_None)
@@ -285,6 +306,10 @@ def _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names, disabl
             cmd.append(size)
     for name in super_names:
         cmd.extend(['--super-mode', name])
+
+    # Care-map fingerprint overrides.
+    for part_name, value in (fingerprints or []):
+        cmd.extend(['--fingerprint', part_name, value])
 
     return cmd, output_name
 
@@ -353,7 +378,9 @@ def _patch_ota_disable_avb():
                 if name:
                     super_names.append(name)
 
-    cmd, output_name = _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names, disable_avb=True)
+    fingerprints = _ask_fingerprints(replace_parts, new_parts)
+    cmd, output_name = _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names,
+                                        disable_avb=True, fingerprints=fingerprints)
     cmd.extend(['--disable-avb', '--skip-system-ota-cert', '--rootless'])
 
     print(f'\n  输出: {output_name}')
@@ -441,7 +468,9 @@ def _patch_ota_with_avb():
                 if name:
                     super_names.append(name)
 
-    cmd, output_name = _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names)
+    fingerprints = _ask_fingerprints(replace_parts, new_parts)
+    cmd, output_name = _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names,
+                                        fingerprints=fingerprints)
     cmd.extend(['--rootless'])
 
     print(f'\n  输出: {output_name}')
