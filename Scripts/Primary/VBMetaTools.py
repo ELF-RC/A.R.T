@@ -75,24 +75,31 @@ def _unencrypted_key_path(pass_path):
     return plain_key, plain_key
 
 
-def _select_file(prompt="选择文件"):
+def _select_files(prompt="选择文件"):
+    """Input may contain multiple space-separated absolute paths."""
     while True:
-        path = input(f'\n  {prompt}（绝对路径）>> ').strip()
-        if not path:
-            return None
-        if os.path.isfile(path):
-            return path
-        print(f'  {RED}> 文件不存在: {path}{CLOSE}')
+        line = input(f'\n  {prompt}（绝对路径，多个用空格分隔）>> ').strip()
+        if not line:
+            return []
+        paths = line.split()
+        missing = [p for p in paths if not os.path.isfile(p)]
+        if missing:
+            for p in missing:
+                print(f'  {RED}> 文件不存在: {p}{CLOSE}')
+            continue
+        return paths
 
 
 # Interactive AVB and VBMeta operations.
 def cmd_info_image():
     """[01] Show image information"""
-    img = _select_file('选择要查看的镜像')
-    if not img:
+    imgs = _select_files('选择要查看的镜像')
+    if not imgs:
         input('> 按回车继续')
         return
-    _run(['info_image', '--image', img])
+    for img in imgs:
+        print(f'\n  查看: {img}')
+        _run(['info_image', '--image', img])
     input('> 按回车继续')
 
 
@@ -166,7 +173,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         r = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
-            '--hash_algorithm', 'SHA256',
+            '--hash_algorithm', 'sha256',
             '--partition_size', str(trial_ps)] +
             ['--calc_max_image_size'],
             capture_output=True, text=True)
@@ -175,7 +182,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         r2 = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
-            '--hash_algorithm', 'SHA256',
+            '--hash_algorithm', 'sha256',
             '--partition_size', aligned_ps] +
             ['--calc_max_image_size'],
             capture_output=True, text=True)
@@ -188,7 +195,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
     # Build the argument list.
     args = [cmd_name, '--image', out_img, '--partition_name', part_name,
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
-            '--hash_algorithm', 'SHA256',
+            '--hash_algorithm', 'sha256',
             '--partition_size', aligned_ps]
     # rollback_index: prompt for hash footer; omit it for hashtree footer.
     if cmd_name == 'add_hash_footer':
@@ -213,62 +220,66 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
 
 def cmd_add_hash_footer():
     """[02] Add a hash footer to small partitions such as boot, recovery, and dtbo"""
-    img = _select_file('选择要签名的镜像')
-    if not img:
+    imgs = _select_files('选择要签名的镜像')
+    if not imgs:
         input('> 按回车继续')
         return
-    _sign_footer('add_hash_footer', img, trim_zeros=True)
+    for img in imgs:
+        _sign_footer('add_hash_footer', img, trim_zeros=True)
 
 
 def cmd_add_hashtree_footer():
     """[03] Add a hashtree footer to large partitions such as system and vendor"""
-    img = _select_file('选择要签名的镜像')
-    if not img:
+    imgs = _select_files('选择要签名的镜像')
+    if not imgs:
         input('> 按回车继续')
         return
-    _sign_footer('add_hashtree_footer', img, trim_zeros=False)
+    for img in imgs:
+        _sign_footer('add_hashtree_footer', img, trim_zeros=False)
 
 
 def cmd_verify_image():
     """[04] Verify the image signature"""
-    img = _select_file('选择要验证的镜像')
-    if not img:
+    imgs = _select_files('选择要验证的镜像')
+    if not imgs:
         input('> 按回车继续')
         return
 
-    print(f'\n  验证: {img}')
-    # Omit --key so avbtool extracts the public key from the image for verification.
-    # Avoid compatibility issues where newer avbtool cannot read avb_pkmd.bin with OpenSSL 3.x.
-    result = subprocess.run(
-        [AVBTOOL, 'verify_image', '--image', img],
-        capture_output=True, text=True,
-    )
-    output = result.stdout + result.stderr
-    if 'Successfully verified' in output:
-        print('\n  验证通过。')
-    else:
-        print(f'\n  {RED}> 验证失败{CLOSE}')
+    for img in imgs:
+        print(f'\n  验证: {img}')
+        # Omit --key so avbtool extracts the public key from the image.
+        result = subprocess.run(
+            [AVBTOOL, 'verify_image', '--image', img],
+            capture_output=True, text=True,
+        )
+        output = result.stdout + result.stderr
+        if 'Successfully verified' in output:
+            print(f'  {GREEN}验证通过。{CLOSE}')
+        else:
+            print(f'  {RED}验证失败{CLOSE}')
+            print(output, end='')
     input('> 按回车继续')
 
 
 def cmd_erase_footer():
     """[05] Remove the image AVB footer"""
-    img = _select_file('选择要去除签名的镜像')
-    if not img:
+    imgs = _select_files('选择要去除签名的镜像')
+    if not imgs:
         input('> 按回车继续')
         return
 
-    base, ext = os.path.splitext(img)
-    out_img = f'{base}_unsign{ext}'
-    shutil.copy2(img, out_img)
+    for img in imgs:
+        base, ext = os.path.splitext(img)
+        out_img = f'{base}_unsign{ext}'
+        shutil.copy2(img, out_img)
 
-    print(f'\n  去除签名: {img}')
-    ok = _run(['erase_footer', '--image', out_img])
-    if ok:
-        print('\n  Patch has been completed.')
-    else:
-        print(f'\n  {RED}> 失败{CLOSE}')
-        os.remove(out_img)
+        print(f'\n  去除签名: {img}')
+        ok = _run(['erase_footer', '--image', out_img])
+        if ok:
+            print(f'  {GREEN}Patch has been completed.{CLOSE}')
+        else:
+            print(f'  {RED}> 失败{CLOSE}')
+            os.remove(out_img)
     input('> 按回车继续')
 
 
