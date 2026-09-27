@@ -136,6 +136,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         r = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
+            '--hash_algorithm', 'SHA256',
             '--partition_size', str(trial_ps)] +
             (['--pass-file', pass_path] if pass_path else []) +
             ['--calc_max_image_size'],
@@ -145,6 +146,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         r2 = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
+            '--hash_algorithm', 'SHA256',
             '--partition_size', aligned_ps] +
             (['--pass-file', pass_path] if pass_path else []) +
             ['--calc_max_image_size'],
@@ -158,6 +160,7 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
     # Build the argument list.
     args = [cmd_name, '--image', out_img, '--partition_name', part_name,
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
+            '--hash_algorithm', 'SHA256',
             '--partition_size', aligned_ps]
     if pass_path:
         args.extend(['--pass-file', pass_path])
