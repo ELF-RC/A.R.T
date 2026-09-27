@@ -548,6 +548,7 @@ def _decompress_payload_images(payload, payload_dir, mode):
             )
         if len(payload_partitions) % 2:
             print()
+        print()
         names = {name for name, _ in payload_partitions}
         selected = input(
             f'> {RED}根据以上信息输入一个或多个镜像，以空格分开{CLOSE}\n> {MAGENTA}'
