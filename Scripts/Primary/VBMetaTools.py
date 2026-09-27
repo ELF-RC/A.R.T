@@ -151,7 +151,9 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
     else:
         img_size = orig_size
 
+    # Show which image is being signed (matters when processing several in a row).
     # Partition name: use the user input, or the filename without .img when empty.
+    print(f'\n  当前镜像: {os.path.basename(img)}')
     part_name = input('\n  分区名（留空用文件名）>> ').strip() or os.path.splitext(os.path.basename(img))[0]
 
     pass_path = _pass_file_path()
