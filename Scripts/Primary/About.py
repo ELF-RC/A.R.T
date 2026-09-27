@@ -27,11 +27,11 @@ def show():
   ELF-RC (3580977309@qq.com)
 
 {YELLOW}二进制文件开发者:{CLOSE}
-  AOSP (Apache-2.0)        - make_ext4fs, img2simg, lpmake
+  AOSP (Apache-2.0)        - img2simg, lpmake
   erofs-utils (GPL-2.0)    - extract.erofs, mkfs.erofs
-  e2fsprogs (GPL-2.0)      - mke2fs, e2fsdroid, e2fsck, resize2fs
+  e2fsprogs (GPL-2.0)      - mke2fs, e2fsdroid
   Magisk (GPL-3.0)         - magiskboot
-  BusyBox (GPL-2.0)        - busybox, cpio
+  BusyBox (GPL-2.0)        - busybox
   Google (Apache-2.0)      - brotli
   Meta (BSD-3-Clause)      - zstd
   dtc (GPL-2.0)            - dtc

@@ -58,7 +58,7 @@ class GlobalValue(object):
 
     def __init__(self):
         self.programs = [
-            "cpio", "brotli", "img2simg", "e2fsck", "resize2fs",
+            "brotli", "img2simg",
             "mke2fs", "e2fsdroid", "mkfs.erofs", "lpmake",
             "extract.erofs", "magiskboot", "avbroot",
         ]
