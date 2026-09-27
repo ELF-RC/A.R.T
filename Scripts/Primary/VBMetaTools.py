@@ -51,6 +51,30 @@ def _pass_file_path():
     return str(p) if p.is_file() else None
 
 
+def _unencrypted_key_path(pass_path):
+    """Decrypt a passphrase-protected avb.key into a temp plaintext key.
+
+    This avbtool build has no --pass-file option, so when the private key
+    is encrypted we decrypt it first with the bundled openssl and hand the
+    plaintext key to --key. Returns (plaintext_key_path, temp_to_cleanup)
+    or (None, None) when decryption fails.
+    """
+    if not pass_path:
+        return None, None
+    OPENSSL = os.path.join(os.path.dirname(AVBTOOL), 'openssl')
+    encrypted_key = os.path.join(os.path.dirname(pass_path), 'avb.key')
+    plain_key = encrypted_key + '.plain'
+    result = subprocess.run(
+        [OPENSSL, 'rsa', '-in', encrypted_key, '-out', plain_key,
+         '-passin', f'file:{pass_path}'],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not os.path.isfile(plain_key):
+        print(f'\n{RED}> 解密 avb.key 失败: {result.stderr.strip()}{CLOSE}')
+        return None, None
+    return plain_key, plain_key
+
+
 def _select_file(prompt="选择文件"):
     while True:
         path = input(f'\n  {prompt}（绝对路径）>> ').strip()
@@ -124,6 +148,12 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
     part_name = input('\n  分区名（留空用文件名）>> ').strip() or os.path.splitext(os.path.basename(img))[0]
 
     pass_path = _pass_file_path()
+    # avbtool has no passphrase option: decrypt the key first when needed.
+    unenc_key, unenc_cleanup = _unencrypted_key_path(pass_path)
+    if pass_path and not unenc_key:
+        input('> 按回车继续')
+        return
+    key_path = unenc_key or key_path
     # partition_size: use the user value, or calculate it automatically.
     ps_input = input('  分区大小（字节），留空自动计算 >> ').strip()
     import math
@@ -138,7 +168,6 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
             '--hash_algorithm', 'SHA256',
             '--partition_size', str(trial_ps)] +
-            (['--pass-file', pass_path] if pass_path else []) +
             ['--calc_max_image_size'],
             capture_output=True, text=True)
         max_img = int(r.stdout.strip()) if r.stdout.strip().isdigit() else 0
@@ -148,7 +177,6 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
             '--hash_algorithm', 'SHA256',
             '--partition_size', aligned_ps] +
-            (['--pass-file', pass_path] if pass_path else []) +
             ['--calc_max_image_size'],
             capture_output=True, text=True)
         max_img2 = int(r2.stdout.strip()) if r2.stdout.strip().isdigit() else 0
@@ -162,8 +190,6 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
             '--algorithm', 'SHA256_RSA4096', '--key', key_path,
             '--hash_algorithm', 'SHA256',
             '--partition_size', aligned_ps]
-    if pass_path:
-        args.extend(['--pass-file', pass_path])
     # rollback_index: prompt for hash footer; omit it for hashtree footer.
     if cmd_name == 'add_hash_footer':
         rollback = input('  回滚索引（默认0）>> ').strip() or '0'
@@ -171,6 +197,12 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
 
     print(f'  输出: {out_img}')
     ok = _run(args)
+    # Remove the temporary plaintext key regardless of the signing result.
+    if unenc_cleanup:
+        try:
+            os.remove(unenc_cleanup)
+        except OSError:
+            pass
     if ok:
         print('\n  Patch has been completed.')
     else:
