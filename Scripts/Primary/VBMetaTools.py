@@ -125,13 +125,22 @@ def _trim_trailing_zeros(img):
         return 0
 
 
-def _sign_footer(cmd_name, img, trim_zeros=True):
-    """Common logic for add_hash_footer and add_hashtree_footer。"""
-    key_path = _avb_key_path()
-    if not key_path:
-        print(f'\n{RED}> 未找到 avb.key，请先生成密钥{CLOSE}')
-        input('> 按回车继续')
-        return
+def _sign_footer(cmd_name, img, trim_zeros=True, algorithm='SHA256_RSA4096', need_key=True):
+    """Common logic for add_hash_footer and add_hashtree_footer.
+
+    algorithm: avbtool --algorithm value. 'NONE' produces an unencrypted
+    hashtree footer (no public key) so that tools such as avbroot treat the
+    partition as unsigned and copy its hashtree into the parent vbmeta.
+    need_key: whether the signing flow requires avb.key.
+    """
+    if need_key:
+        key_path = _avb_key_path()
+        if not key_path:
+            print(f'\n{RED}> 未找到 avb.key，请先生成密钥{CLOSE}')
+            input('> 按回车继续')
+            return
+    else:
+        key_path = None
 
     # Copy the original to x_signed.img and operate on the copy.
     base, ext = os.path.splitext(img)
@@ -156,13 +165,21 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
     print(f'\n  当前镜像: {os.path.basename(img)}')
     part_name = input('\n  分区名（留空用文件名）>> ').strip() or os.path.splitext(os.path.basename(img))[0]
 
-    pass_path = _pass_file_path()
-    # avbtool has no passphrase option: decrypt the key first when needed.
-    unenc_key, unenc_cleanup = _unencrypted_key_path(pass_path)
-    if pass_path and not unenc_key:
-        input('> 按回车继续')
-        return
-    key_path = unenc_key or key_path
+    # NONE algorithm needs no signing key.
+    unenc_key = None
+    unenc_cleanup = None
+    if algorithm != 'NONE':
+        pass_path = _pass_file_path()
+        # avbtool has no passphrase option: decrypt the key first when needed.
+        unenc_key, unenc_cleanup = _unencrypted_key_path(pass_path)
+        if pass_path and not unenc_key:
+            input('> 按回车继续')
+            return
+        key_path = unenc_key or key_path
+
+    # Build the per-call argument fragments used for the calc_max probes.
+    key_args = [] if algorithm == 'NONE' else ['--key', key_path]
+    alg_args = ['--algorithm', algorithm] + key_args
     # partition_size: use the user value, or calculate it automatically.
     ps_input = input('  分区大小（字节），留空自动计算 >> ').strip()
     import math
@@ -174,19 +191,19 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
         trial_ps = (img_size + 64 * 1024 * 1024 + 4095) // 4096 * 4096
         r = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
-            '--algorithm', 'SHA256_RSA4096', '--key', key_path,
-            '--hash_algorithm', 'sha256',
-            '--partition_size', str(trial_ps)] +
-            ['--calc_max_image_size'],
+            '--hash_algorithm', 'sha256'] +
+            alg_args +
+            ['--partition_size', str(trial_ps),
+             '--calc_max_image_size'],
             capture_output=True, text=True)
         max_img = int(r.stdout.strip()) if r.stdout.strip().isdigit() else 0
         aligned_ps = str(math.ceil(img_size / max_img * trial_ps / 4096) * 4096)
         r2 = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
-            '--algorithm', 'SHA256_RSA4096', '--key', key_path,
-            '--hash_algorithm', 'sha256',
-            '--partition_size', aligned_ps] +
-            ['--calc_max_image_size'],
+            '--hash_algorithm', 'sha256'] +
+            alg_args +
+            ['--partition_size', aligned_ps,
+             '--calc_max_image_size'],
             capture_output=True, text=True)
         max_img2 = int(r2.stdout.strip()) if r2.stdout.strip().isdigit() else 0
         if max_img2 < img_size:
@@ -196,9 +213,8 @@ def _sign_footer(cmd_name, img, trim_zeros=True):
 
     # Build the argument list.
     args = [cmd_name, '--image', out_img, '--partition_name', part_name,
-            '--algorithm', 'SHA256_RSA4096', '--key', key_path,
-            '--hash_algorithm', 'sha256',
-            '--partition_size', aligned_ps]
+            '--hash_algorithm', 'sha256'] + alg_args + \
+           ['--partition_size', aligned_ps]
     # rollback_index: prompt for hash footer; omit it for hashtree footer.
     if cmd_name == 'add_hash_footer':
         rollback = input('  回滚索引（默认0）>> ').strip() or '0'
@@ -238,6 +254,18 @@ def cmd_add_hashtree_footer():
         return
     for img in imgs:
         _sign_footer('add_hashtree_footer', img, trim_zeros=False)
+
+
+def cmd_add_hashtree_footer_plain():
+    """[06] Add an unencrypted hashtree footer (NONE) so avbroot treats the
+    partition as unsigned and copies its hashtree into the parent vbmeta."""
+    imgs = _select_files('选择要签名的镜像（不加密）')
+    if not imgs:
+        input('> 按回车继续')
+        return
+    for img in imgs:
+        _sign_footer('add_hashtree_footer', img, trim_zeros=False,
+                     algorithm='NONE', need_key=False)
 
 
 def cmd_verify_image():
@@ -296,13 +324,15 @@ def main():
         '01': cmd_info_image,
         '02': cmd_add_hash_footer,
         '03': cmd_add_hashtree_footer,
-        '04': cmd_verify_image,
-        '05': cmd_erase_footer,
+        '04': cmd_add_hashtree_footer_plain,
+        '05': cmd_verify_image,
+        '06': cmd_erase_footer,
         '1': cmd_info_image,
         '2': cmd_add_hash_footer,
         '3': cmd_add_hashtree_footer,
-        '4': cmd_verify_image,
-        '5': cmd_erase_footer,
+        '4': cmd_add_hashtree_footer_plain,
+        '5': cmd_verify_image,
+        '6': cmd_erase_footer,
     }
 
     while True:
@@ -316,9 +346,11 @@ def main():
         print()
         print(f'  {GREEN}[03]{CLOSE}\t添加哈希树签名 (大分区)')
         print()
-        print(f'  {CYAN}[04]{CLOSE}\t验证镜像签名')
+        print(f'  {GREEN}[04]{CLOSE}\t添加哈希树签名 (不加密)')
         print()
-        print(f'  {CYAN}[05]{CLOSE}\t去除镜像签名')
+        print(f'  {CYAN}[05]{CLOSE}\t验证镜像签名')
+        print()
+        print(f'  {CYAN}[06]{CLOSE}\t去除镜像签名')
         print()
 
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
