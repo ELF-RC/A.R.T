@@ -132,20 +132,7 @@ def _update_dynamic_partitions(label, distance):
         if not os.path.isfile(new_op_list):
             shutil.copyfile(op_list, new_op_list)
     else:
-        content = "remove_all_groups\n"
-        for slot in ("_a", "_b"):
-            content += (
-                f"add_group qti_dynamic_partitions{slot} "
-                f"{V.SETUP_MANIFEST['SUPER_SIZE']}\n"
-            )
-        for partition in ("system", "system_ext", "product", "vendor", "odm"):
-            for slot in ("_a", "_b"):
-                content += f"add {partition}{slot} qti_dynamic_partitions{slot}\n"
-        for partition in ("system_a", "system_ext_a", "product_a", "vendor_a", "odm_a"):
-            content += f"resize {partition} 2\n"
-        with open(new_op_list, "w", encoding="UTF-8", newline="\n") as target:
-            target.write(content)
-
+        return None
     renew_size = os.path.getsize(distance)
     with open(new_op_list, "r", encoding="UTF-8") as source:
         lines = source.readlines()
