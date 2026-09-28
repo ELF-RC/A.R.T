@@ -120,9 +120,9 @@ def decompress(infile, flag=4):
         only = valid_imgs[0]
         partition = partition_name(only)
         f_type = get_file_type(only)
-        print('─' * 16)
+        print('─' * 40)
         print(f' 分解: {os.path.basename(only)}')
-        print('─' * 16)
+        print('─' * 40)
         print(f'\n类型: {f_type}')
         print(f'输出: WORKSPACE/{partition}')
         if input('\n是否继续? [Y/n] ').strip().lower() in ('n', 'no'):
