@@ -205,7 +205,8 @@ def decompress_dat(transfer, source, distance=None, keep=0):
         partition = partition_name(source)
         combined = _combine_fragments(source)
         raw_image = os.path.join(V.workspace, f'{partition}.img')
-        display(f"正在分解: {os.path.basename(combined)} ...", 3)
+        print(f"正在分解: {os.path.basename(combined)} ...")
+        print()
         _sdat2img_main(transfer, combined, raw_image)
         if not os.path.isfile(raw_image):
             raise SdatError('未生成 raw image')
@@ -239,7 +240,8 @@ def decompress_bro(transfer, source, distance=None, keep=0):
         if not combined.endswith('.br'):
             raise LayoutError(f'BROTLI 文件扩展名无效: {combined}')
         staged_dat = combined[:-3]
-        display(f"正在分解: {os.path.basename(source)} ...", 3)
+        print(f"正在分解: {os.path.basename(source)} ...")
+        print()
         if call(['brotli', '-df', combined, '-o', staged_dat]) != 0:
             raise LayoutError('brotli 解压失败')
         if not os.path.isfile(staged_dat):
@@ -300,6 +302,7 @@ def decompress_dat_batch(infile, flag):
         for i, it in enumerate(items, 1):
             print(f'  {YELLOW}[{i:>2}]{CLOSE}\t{GREEN}{os.path.basename(it["path"])}{CLOSE}')
         print(f'\n{YELLOW}请输入要分解的序号（多个用逗号分隔，0跳过）{CLOSE}')
+        print()
         ans = input('> ').strip()
         if not ans or ans == '0':
             return
@@ -323,16 +326,13 @@ def decompress_dat_batch(infile, flag):
         selected = items
 
     workers = min(len(selected), os.cpu_count() or 2)
-    print(f'\n> 并行分解中......\n')
     ok, fail = 0, 0
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {executor.submit(_decompress_single_partition, it, flag): it for it in selected}
         for future in as_completed(futures):
             result = future.result()
             if result["success"]:
-                print(f'  {GREEN}✓{CLOSE} {result["partition"]}')
                 ok += 1
             else:
                 print(f'  {RED}✗{CLOSE} {result["partition"]}: {result["error"]}')
                 fail += 1
-    print(f'\n> 分解完成: {ok}/{ok + fail} 成功')
