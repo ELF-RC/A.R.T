@@ -143,6 +143,7 @@ def decompress(infile, flag=4):
         print(f'    {idx:<6}{os.path.basename(part):<24}{ftype:<10}')
     print()
     choice = input('请输入需要分解的 文件名/序号: ').strip()
+    print()
     if not choice:
         return
     selected, seen = [], set()
