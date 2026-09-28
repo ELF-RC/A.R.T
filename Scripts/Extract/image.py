@@ -107,19 +107,59 @@ def decompress(infile, flag=4):
         decompress_dat_batch(infile, flag)
         return
 
-    # flag 4 (img): sequential with per-file confirmation
-    for part in sorted(infile):
-        if not os.path.isfile(part):
-            continue
+    # flag 4 (img)
+    valid_imgs = [
+        part for part in sorted(infile)
+        if os.path.isfile(part)
+        and os.path.basename(part) not in ('dsp.img', 'cust.img')
+        and get_file_type(part) in ('ext', 'sparse', 'erofs', 'super', 'boot', 'vendor_boot')
+    ]
+
+    # Single image: show a dedicated confirmation screen.
+    if len(valid_imgs) == 1:
+        only = valid_imgs[0]
+        partition = partition_name(only)
+        f_type = get_file_type(only)
+        print('─' * 16)
+        print(f' 分解: {os.path.basename(only)}')
+        print('─' * 16)
+        print(f'\n类型: {f_type}')
+        print(f'输出: WORKSPACE/{partition}')
+        if input('\n是否继续? [Y/n] ').strip().lower() in ('n', 'no'):
+            return True
         try:
-            if os.path.basename(part) in ('dsp.img', 'cust.img'):
+            decompress_img(only, workspace_partition(partition))
+        except LayoutError as error:
+            print(f'> 跳过 {os.path.basename(only)}: {error}')
+        return
+
+    # Multiple images: display a table, let the user pick by name or index.
+    type_labels = {'ext': 'ext4', 'sparse': 'sparse'}
+    print(f'发现 {len(valid_imgs)} 个镜像文件:\n')
+    print(f'  {"序号":<6}{"文件名":<20}{"文件类型":<10}')
+    print('  ' + '─' * 40)
+    for idx, part in enumerate(valid_imgs, 1):
+        ftype = type_labels.get(get_file_type(part), get_file_type(part))
+        print(f'    {idx:<6}{os.path.basename(part):<24}{ftype:<10}')
+    print()
+    choice = input('请输入需要分解的 文件名/序号: ').strip()
+    if not choice:
+        return
+    selected, seen = [], set()
+    for token in choice.split():
+        if token.isdigit():
+            idx = int(token)
+            if not 1 <= idx <= len(valid_imgs):
                 continue
-            if get_file_type(part) not in ('ext', 'sparse', 'erofs', 'super', 'boot', 'vendor_boot'):
-                continue
-            if not V.JM:
-                display(f'是否分解: {os.path.basename(part)} [1/0]: ', 2, '')
-                if input() != '1':
-                    continue
+            target = valid_imgs[idx - 1]
+        else:
+            target = next((part for part in valid_imgs
+                          if os.path.basename(part) == token), None)
+        if target is not None and target not in seen:
+            seen.add(target)
+            selected.append(target)
+    for part in selected:
+        try:
             decompress_img(part, workspace_partition(partition_name(part)))
         except LayoutError as error:
             print(f'> 跳过 {os.path.basename(part)}: {error}')

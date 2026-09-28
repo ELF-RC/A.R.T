@@ -296,7 +296,11 @@ def menu_main():
                                input(f'> {RED}选择提取方式:  [0]全盘提取  [1]指定镜像{CLOSE} >> '))
         elif int(option) in [2, 3, 4]:
             quiet()
-            decompress(glob(V.input + {2: "*.br", 3: "*.new.dat", 4: "*.img"}[int(option)]), int(option))
+            if int(option) == 4:
+                os.system("clear")
+            canceled = decompress(glob(V.input + {2: "*.br", 3: "*.new.dat", 4: "*.img"}[int(option)]), int(option))
+            if canceled:
+                continue
         elif int(option) == 5:
             infile = glob(V.input + '*.win*')
             for i in glob(V.input + '*.win'):
