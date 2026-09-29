@@ -155,7 +155,7 @@ def _update_dynamic_partitions(label, distance):
         if not os.path.isfile(new_op_list):
             shutil.copyfile(op_list, new_op_list)
     else:
-        return None
+        return True
     renew_size = os.path.getsize(distance)
     with open(new_op_list, "r", encoding="UTF-8") as source:
         lines = source.readlines()
