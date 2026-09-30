@@ -1203,7 +1203,7 @@ def recompress_dat_br(label, distance, flag):
         level = V.SETUP_MANIFEST["REPACK_BR_LEVEL"]
         display(f"重新生成: {label}.new.dat.br | Level={level} ...", 3)
         newdat_brotli = f"{newdat}.br"
-        call(["brotli", f"-{level}jfo", newdat_brotli, newdat])
+        call(["brotli", "-q", level, "-j", "-f", "-T", "8", "-o", newdat_brotli, newdat])
         print(
             f" {GREEN}打包成功{CLOSE}"
             if os.path.isfile(newdat_brotli)
