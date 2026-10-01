@@ -6,6 +6,7 @@ import time
 
 from Scripts.Primary.Utils import (
     CLOSE,
+    GREEN,
     RED,
     V,
     call,
@@ -118,16 +119,39 @@ def _write_image(state, fsconfig, contexts, source, flag):
         new_distance,
     ]
 
-    call(mke2fs_cmd)
-    if os.path.isfile(new_distance) and call(e2fsdroid_cmd) != 0:
+    display(f"Process remaking the file system {label}.img ...", 4, end='')
+    mkfs_log = call(mke2fs_cmd, capture=True)
+    fs_created = os.path.isfile(new_distance)
+    if isinstance(mkfs_log, str):
         try:
             os.remove(new_distance)
-        except OSError:
+        except (OSError, FileNotFoundError):
             pass
-    if not os.path.isfile(new_distance):
+    tool_log = mkfs_log
+    e2fs_log = ''
+    if fs_created:
+        e2fs_result = call(e2fsdroid_cmd, capture=True)
+        if isinstance(e2fs_result, str):
+            e2fs_log = e2fs_result
+        elif e2fs_result != 0:
+            print(f"\n{RED}Failed !{CLOSE}\n")
+            print(f'  e2fsdroid 退出码: {e2fs_result}')
+            if tool_log:
+                print(f'  mke2fs 日志:')
+                for line in str(tool_log).splitlines():
+                    print(f'    {line}')
+            return False
+        if not os.path.isfile(new_distance):
+            print(f"\n{RED}Failed !{CLOSE}\n")
+            print('> e2fsdroid 未生成目标镜像')
+            return False
+    else:
+        print(f"\n{RED}Failed !{CLOSE}\n")
+        print('> mke2fs 失败:')
+        print(f'  {tool_log}')
         return False
 
-    print(" Done")
+    print(f"\n{GREEN}Success !{CLOSE}")
     if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" or flag > 9:
         display("开始转换: sparse format ...")
         if call(["img2simg", new_distance, distance]) != 0:

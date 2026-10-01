@@ -111,8 +111,13 @@ def init_bin_path():
 
 
 # Execute one bundled tool while preserving the historical call API.
-def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None):
-    """Run a command with MIO-compatible argv handling and no implicit shell."""
+def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None, capture=False):
+    """Run a command with MIO-compatible argv handling and no implicit shell.
+
+    capture=True keeps the process output in memory instead of printing it;
+    on non-zero exit the output (or a launch error) is returned so the caller
+    can show a log without it having leaked to the terminal.
+    """
     del sp
     if isinstance(exe, (list, tuple)):
         cmd = [str(item) for item in exe if item not in (None, '')]
@@ -135,14 +140,23 @@ def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None):
             env=env,
         )
     except OSError as error:
-        print(f'> 启动命令失败: {error}')
+        message = f'> 启动命令失败: {error}'
+        if capture:
+            return message
+        print(message)
         return 127
 
+    lines = []
     if process.stdout:
-        for line in iter(process.stdout.readline, b''):
-            if out == 0:
-                print(line.decode('utf-8', 'ignore').strip())
-    return process.wait()
+        for raw in iter(process.stdout.readline, b''):
+            line = raw.decode('utf-8', 'ignore').rstrip('\n')
+            lines.append(line)
+            if not capture and out == 0:
+                print(line.strip())
+    exit_code = process.wait()
+    if capture and exit_code != 0:
+        return '\n'.join(line for line in lines if line.strip()) or f'退出码: {exit_code}'
+    return exit_code
 
 
 
