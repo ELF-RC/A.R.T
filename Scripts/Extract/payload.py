@@ -538,30 +538,37 @@ def _decompress_payload_images(payload, payload_dir, mode):
     if mode == '1':
         print(f'> {YELLOW}包含的所有镜像文件: {CLOSE}\n')
         name_width = max(len(name) for name, _ in payload_partitions) + 4
-        for index, (name, size) in enumerate(payload_partitions):
-            print(
-                f'  {GREEN}{name}{CLOSE}'.ljust(
-                    name_width + len(GREEN) + len(CLOSE)
-                ),
-                f'{_human_size(size):>10}',
-                end='' if index % 2 == 0 else '\n',
-            )
-        if len(payload_partitions) % 2:
-            print()
+        # Adaptive column count so the two-column table fits narrow terminals.
+        terminal_width = shutil.get_terminal_size().columns
+        pair_width = name_width + 12  # name column + 10-char size + 2 spaces
+        cols = 1 if pair_width * 2 > terminal_width else 2
+        for index in range(0, len(payload_partitions), cols):
+            chunk = payload_partitions[index:index + cols]
+            line = '  '
+            for offset, (name, size) in enumerate(chunk):
+                cell = f'{offset + index + 1:>2} > {name}'.ljust(name_width + 4) + f'{_human_size(size):>10}'
+                line += cell
+                if offset < len(chunk) - 1:
+                    line += '  '
+            print(line)
         print()
-        names = {name for name, _ in payload_partitions}
-        selected = input(
-            f'> {RED}根据以上信息输入一个或多个镜像（all=全部），以空格分开{CLOSE}\n> {MAGENTA}'
+        names = [name for name, _ in payload_partitions]
+        raw = input(
+            f'> {RED}输入要分解的镜像名称/序号，all全选，空格分开{CLOSE}\n> {MAGENTA}'
         ).split()
-        if 'all' in selected:
-            for name, _ in payload_partitions:
+        if not raw:
+            print('> 未选择任何分区')
+        elif 'all' in raw:
+            for name in names:
                 run(payload, payload_dir, name)
-            selected = []
-        for partition in selected:
-            if partition in names:
-                run(payload, payload_dir, partition)
-            else:
-                print(f'> 跳过未知 Payload 分区: {partition}')
+        else:
+            for token in raw:
+                if token.isdigit() and 1 <= int(token) <= len(names):
+                    run(payload, payload_dir, names[int(token) - 1])
+                elif token in names:
+                    run(payload, payload_dir, token)
+                else:
+                    print(f'> 跳过未知 Payload 分区: {token}')
     else:
         print(f'> {YELLOW}提取【{os.path.basename(payload)}】所有镜像文件:{CLOSE}\n')
         main(payload, payload_dir)
