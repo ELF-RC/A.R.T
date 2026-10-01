@@ -15,7 +15,6 @@ import time
 from glob import glob
 
 from Scripts.Primary.Utils import V
-from Scripts.Primary.Console import display
 from Scripts.Primary.ImageTools import get_file_type
 from Scripts.Primary.WorkSpace import LayoutError
 from Scripts.Primary.WorkSpace import (
@@ -187,9 +186,9 @@ def extract_zrom(rom):
             mod_name = os.path.basename(rom).rsplit('.', 1)[0].replace(' ', '_')
             sub_dir = MOD_DIR + 'DNA_' + mod_name
             if not os.path.isdir(sub_dir):
-                display(f'是否安装插件: {mod_name} ? [1/0]: ', 2, '')
+                print(f'是否安装插件: {mod_name} ? [1/0]: ', end='')
             else:
-                display(f'已安装插件: {mod_name}，是否删除原插件后安装 ? [0/1]: ', 2, '')
+                print(f'已安装插件: {mod_name}，是否删除原插件后安装 ? [0/1]: ', end='')
             if input() == '1':
                 rmdire(sub_dir)
                 os.makedirs(sub_dir, exist_ok=True)

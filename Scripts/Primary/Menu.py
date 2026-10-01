@@ -9,7 +9,7 @@ from Scripts.Primary.Utils import (
     V, PWD_DIR, RED, CLOSE,
     rmdire,
 )
-from Scripts.Primary.Console import CoastTime, display
+from Scripts.Primary.Console import CoastTime
 from Scripts.Primary.Settings import load_setup_json, env_setup
 from Scripts.Primary.WorkSpace import envelop_project, workspace_partition
 from Scripts.Primary.WorkSpace import LayoutError, UnsupportedLayoutError
@@ -313,7 +313,7 @@ def menu_main():
                     f_basename = os.path.basename(file).rsplit('_', 1)[0]
                     source = workspace_partition(f_basename)
                     if os.path.isdir(source):
-                        display(f'是否合成: {f_basename}.img [1/0]: ', end='')
+                        print(f'是否合成: {f_basename}.img [1/0]: ', end='')
                         if input() != '1':
                             continue
                         boot_repack(source, V.out)
@@ -328,7 +328,7 @@ def menu_main():
                         infojson = None
                     if os.path.isfile(contexts) and os.path.isfile(fsconfig):
                         txts = {9: "img", 10: "new.dat", 11: "new.dat.br"}
-                        display(f'是否合成: {f_basename}.{txts.get(int(option), ".new.dat.br")} [1/0]: ', end='')
+                        print(f'是否合成: {f_basename}.{txts.get(int(option), ".new.dat.br")} [1/0]: ', end='')
                         if input() != '1':
                             continue
                         if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "1":

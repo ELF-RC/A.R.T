@@ -12,7 +12,6 @@ from Scripts.Primary.Utils import (
     get_dir_size,
 )
 from Scripts.Primary.FileConfigPatcher import patch_fsconfig
-from Scripts.Primary.Console import display
 from Scripts.Primary.WorkSpace import load_image_json
 from Scripts.ReMake.dat_br import recompress_dat_br
 
@@ -106,7 +105,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
 
     print(" Done")
     if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" or flag > 9:
-        display("开始转换: sparse format ...")
+        print("开始转换: sparse format ...")
         if call(["img2simg", new_distance, distance]) != 0:
             return False
         try:
@@ -159,8 +158,8 @@ def recompress_erofs(source, fsconfig, contexts, dumpinfo, flag=8):
         printinform += "|lz4hc"
     elif V.SETUP_MANIFEST["RESIZE_EROFSIMG"] == "2":
         printinform += "|lz4"
-    display(printinform)
-    display(f"重新合成: {state['label']}.img ...", 4)
+    print(printinform)
+    print(f"重新合成: {state['label']}.img ...")
     if _write_image(state, fsconfig, contexts, source, flag):
         if _update_dynamic_partitions(state["label"], state["distance"]) and flag > 9:
             recompress_dat_br(state["label"], state["distance"], flag)

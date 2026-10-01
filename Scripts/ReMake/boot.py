@@ -4,7 +4,6 @@ import os
 import subprocess
 
 from Scripts.Primary.Utils import V, BIN_PATH, call
-from Scripts.Primary.Console import display
 from Scripts.Primary.Utils import findfile
 
 
@@ -63,5 +62,5 @@ def boot_repack(source, distance):
     """Entry point for boot repack."""
     if not os.path.isdir(distance):
         os.makedirs(distance)
-    display(f"重新合成: {os.path.basename(source)}.img")
+    print(f"重新合成: {os.path.basename(source)}.img")
     return dboot(source, distance)

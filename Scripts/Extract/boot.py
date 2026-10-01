@@ -5,7 +5,6 @@ import shutil
 from pathlib import Path
 
 from Scripts.Primary.Utils import V, call, rmdire
-from Scripts.Primary.Console import display
 from Scripts.Primary.ImageTools import get_file_type
 
 
@@ -65,5 +64,5 @@ def boot_unpack(source, distance):
     """Entry point for boot unpack."""
     if not os.path.isdir(distance):
         os.makedirs(distance)
-    display(f"正在分解: {os.path.basename(source)}")
+    print(f"正在分解: {os.path.basename(source)}")
     return unpackboot(source, distance)

@@ -5,7 +5,6 @@ import shutil
 from pathlib import Path
 
 from Scripts.Primary.Utils import V
-from Scripts.Primary.Console import display
 from Scripts.Primary.WorkSpace import workspace_partition
 from Scripts.Primary.SuperTools import LpUnpack, LpUnpackError, _SparseRawCache, unpack
 
@@ -101,7 +100,7 @@ def _move_super_images_to_out(super_dir):
             if dst.exists():
                 dst.unlink()
             os.replace(str(src), str(dst))
-            display(f'已输出: {name} -> {out_dir}')
+            print(f'已输出: {name} -> {out_dir}')
 
 
 def extract_super(working_source, partition):
@@ -111,7 +110,7 @@ def extract_super(working_source, partition):
     """
     from Scripts.Extract.image import decompress_img
 
-    display(f'正在分解: {os.path.basename(working_source)} <super>', 3)
+    print(f'正在分解: {os.path.basename(working_source)} <super>')
     super_dir = os.path.join(V.workspace, 'super') + os.sep
     try:
         unpack(working_source, super_dir, temp_dir=super_dir)

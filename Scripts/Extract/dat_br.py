@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from Scripts.Primary.Utils import V, RED, GREEN, YELLOW, CLOSE, call
-from Scripts.Primary.Console import display
 from Scripts.Primary.WorkSpace import LayoutError
 from Scripts.Primary.WorkSpace import partition_name, workspace_partition
 
@@ -181,7 +180,7 @@ def _combine_fragments(source):
     with open(dest, 'xb') as destination_file:
         for index, fragment in enumerate(sources):
             if index:
-                display(f'合并: {fragment.name} ...')
+                print(f'合并: {fragment.name} ...')
             with open(fragment, 'rb') as source_file:
                 shutil.copyfileobj(source_file, destination_file, length=1024 * 1024)
     return str(dest)

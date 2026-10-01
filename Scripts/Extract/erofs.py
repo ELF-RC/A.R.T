@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 
 from Scripts.Primary.Utils import V, call
-from Scripts.Primary.Console import display
 
 
 # Validate partition paths and normalize extractor metadata.
@@ -77,7 +76,7 @@ def extract_erofs(working_source, partition, destination):
     destination = Path(destination)
     workspace = _runtime_path('workspace', destination.parent)
     config_dir = _runtime_path('config', workspace / 'config')
-    display(f'正在分解: {source.name} <erofs>', 3)
+    print(f'正在分解: {source.name} <erofs>')
     try:
         if source.is_symlink() or not source.is_file():
             raise LayoutError(f'EROFS 输入镜像无效: {source}')

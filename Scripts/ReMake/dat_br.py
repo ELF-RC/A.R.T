@@ -5,7 +5,6 @@ import tempfile
 
 from Scripts.Primary import SparseMap
 from Scripts.Primary.RangeModule import RangeSet
-from Scripts.Primary.Console import display
 from Scripts.Primary.Utils import (
     CLOSE,
     GREEN,
@@ -1191,7 +1190,7 @@ def recompress_dat_br(label, distance, flag):
     if flag <= 9:
         return
 
-    display(f"重新生成: {label}.new.dat ...", 3)
+    print(f"重新生成: {label}.new.dat ...")
     _image_to_dat(distance, V.out, 4, label)
     newdat = os.path.join(V.out, f"{label}.new.dat")
     if not os.path.isfile(newdat):
@@ -1201,7 +1200,7 @@ def recompress_dat_br(label, distance, flag):
     os.remove(distance)
     if flag == 11:
         level = V.SETUP_MANIFEST["REPACK_BR_LEVEL"]
-        display(f"重新生成: {label}.new.dat.br | Level={level} ...", 3)
+        print(f"重新生成: {label}.new.dat.br | Level={level} ...")
         newdat_brotli = f"{newdat}.br"
         call(["brotli", "-q", level, "-j", "-f", "-T", "8", "-o", newdat_brotli, newdat])
         print(

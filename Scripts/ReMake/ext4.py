@@ -14,7 +14,6 @@ from Scripts.Primary.Utils import (
     get_dir_size,
 )
 from Scripts.Primary.FileConfigPatcher import patch_fsconfig
-from Scripts.Primary.Console import display
 from Scripts.Primary.WorkSpace import load_image_json
 from Scripts.ReMake.dat_br import recompress_dat_br
 
@@ -119,7 +118,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
         new_distance,
     ]
 
-    display(f"Process remaking the file system {label}.img ...", 4, end='')
+    print(f"Process remaking the file system {label}.img ...", end='')
     mkfs_log = call(mke2fs_cmd, capture=True)
     fs_created = os.path.isfile(new_distance)
     if isinstance(mkfs_log, str):
@@ -153,7 +152,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
 
     print(f"\n{GREEN}Success !{CLOSE}")
     if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" or flag > 9:
-        display("开始转换: sparse format ...")
+        print("开始转换: sparse format ...")
         if call(["img2simg", new_distance, distance]) != 0:
             return False
         try:
@@ -204,11 +203,11 @@ def recompress_ext4(source, fsconfig, contexts, dumpinfo, flag=8):
         and V.SETUP_MANIFEST["REPACK_TO_RW"] == "1"
         else 0
     )
-    display(
+    print(
         f"Size:{state['size']}|FsT:ext4|FsR:{state['read_mode']}|"
         f"Sparse:{V.SETUP_MANIFEST['REPACK_SPARSE_IMG']}|Resize:{resize}"
     )
-    display(f"重新合成: {state['label']}.img ...", 4)
+    print(f"重新合成: {state['label']}.img ...")
     if _write_image(state, fsconfig, contexts, source, flag):
         if _update_dynamic_partitions(state["label"], state["distance"]) and flag > 9:
             recompress_dat_br(state["label"], state["distance"], flag)

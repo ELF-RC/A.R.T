@@ -6,7 +6,7 @@ from Scripts.Primary.Utils import V, call
 from Scripts.Primary.ImageTools import (
     is_sparse_image, sparse_to_raw, raw_to_sparse,
 )
-from Scripts.Primary.Console import CoastTime, display
+from Scripts.Primary.Console import CoastTime
 from Scripts.Primary.WorkSpace import LayoutError
 
 
@@ -38,7 +38,7 @@ def repack_super(selected_parts, super_type, super_sparse):
     try:
         for name, path in selected_parts:
             if is_sparse_image(path):
-                display(f'转换 sparse: {os.path.basename(path)} ...')
+                print(f'转换 sparse: {os.path.basename(path)} ...')
                 raw_path = os.path.join(V.workspace, f'.{os.path.basename(path)}.raw.img')
                 raw = sparse_to_raw(path, raw_path, temp_dir=V.workspace)
                 if not raw or not os.path.isfile(raw):
@@ -77,7 +77,7 @@ def repack_super(selected_parts, super_type, super_sparse):
                 b_path = os.path.join(input_dir, f'{name}_b.img')
                 if os.path.isfile(b_path):
                     if is_sparse_image(b_path):
-                        display(f'转换 sparse: {os.path.basename(b_path)} ...')
+                        print(f'转换 sparse: {os.path.basename(b_path)} ...')
                         b_raw_path = os.path.join(V.workspace, f'.{os.path.basename(b_path)}.raw.img')
                         b_raw = sparse_to_raw(b_path, b_raw_path, temp_dir=V.workspace)
                         if b_raw and os.path.isfile(b_raw):
@@ -116,8 +116,8 @@ def repack_super(selected_parts, super_type, super_sparse):
     # final raw -> sparse conversion when the user requests sparse output.
     argvs.extend(['--out', lpmake_output])
 
-    display(f'重新合成: super.img <Size:{super_size}|Type:{type_names[super_type]}|Sparse:{super_sparse}>')
-    display(f"包含分区：{'|'.join(image_parts)}")
+    print(f'重新合成: super.img <Size:{super_size}|Type:{type_names[super_type]}|Sparse:{super_sparse}>')
+    print(f"包含分区：{'|'.join(image_parts)}")
     with CoastTime():
         result = call(argvs)
     if result != 0 or not os.path.isfile(lpmake_output):
