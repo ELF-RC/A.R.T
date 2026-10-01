@@ -292,8 +292,7 @@ def menu_main():
             if not os.path.exists(infile):
                 input("未发现Payload.Bin")
             else:
-                decompress_bin(infile, V.input,
-                               input(f'> {RED}选择提取方式:  [0]全盘提取  [1]指定镜像{CLOSE} >> '))
+                decompress_bin(infile, V.input, flag='1')
         elif int(option) in [2, 3, 4]:
             os.system("clear")
             canceled = decompress(glob(V.input + {2: "*.br", 3: "*.new.dat", 4: "*.img"}[int(option)]), int(option))

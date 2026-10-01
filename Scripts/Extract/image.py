@@ -14,7 +14,7 @@ import os
 import time
 from glob import glob
 
-from Scripts.Primary.Utils import V, RED, CLOSE
+from Scripts.Primary.Utils import V
 from Scripts.Primary.Console import display
 from Scripts.Primary.ImageTools import get_file_type
 from Scripts.Primary.WorkSpace import LayoutError
@@ -225,10 +225,7 @@ def extract_zrom(rom):
     payload_files = sorted(glob(os.path.join(import_dir, '**', 'payload.bin'), recursive=True))
     if payload_files:
         from Scripts.Extract.payload import decompress_bin
-        decompress_bin(
-            payload_files[0],
-            flag=input(f'> {RED}选择提取方式:  [0]全盘提取  [1]指定镜像{CLOSE} >> '),
-        )
+        decompress_bin(payload_files[0], flag='1')
         shutil.rmtree(import_dir, ignore_errors=True)
         return
 
