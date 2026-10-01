@@ -9,10 +9,13 @@ import re
 import shutil
 import struct
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
 from glob import glob
+from multiprocessing import cpu_count
 from pathlib import Path
 
 from Scripts.Primary.Utils import V, RED, GREEN, YELLOW, MAGENTA, CLOSE
@@ -403,11 +406,26 @@ class _PayloadDumper:
 
         with open(output_path, 'wb') as output_file:
             output_file.truncate(total_size)
-        with open(self.payload_path, 'rb') as payload_file, open(output_path, 'r+b') as output_file:
-            for data_offset, operation in operations:
-                self._write_operation(
-                    data_offset, operation, payload_file, output_file, progress_reporter
-                )
+
+        # Restore lost multithreaded extraction (0b73d62): split the partition's
+        # install operations into chunks (>=16MB per chunk, capped at 64 or the
+        # core count) and run each on an independent payload+output file handle.
+        # Threads only seek to disjoint offsets on the pre-allocated output, so
+        # no lock is required; rich progress updates are guarded internally.
+        num_chunks = min(64, os.cpu_count() or 1,
+                         max(1, total_size // (16 * 1024 * 1024)))
+        chunk_size = (len(operations) + num_chunks - 1) // num_chunks
+        chunks = [operations[i:i + chunk_size]
+                   for i in range(0, len(operations), chunk_size)]
+        if len(chunks) <= 1:
+            self._dump_chunk(operations, str(output_path), progress_reporter)
+        else:
+            with ThreadPoolExecutor(max_workers=len(chunks)) as executor:
+                futures = [executor.submit(
+                    self._dump_chunk, chunk, str(output_path), progress_reporter
+                ) for chunk in chunks]
+                for future in as_completed(futures):
+                    future.result()
         if progress_reporter is not None:
             progress_reporter.finish()
         message = f'> Payload 分解完成: {name}.img'
@@ -439,6 +457,20 @@ class _PayloadDumper:
                 pending = b''
         if not decoder.eof:
             raise PayloadError('Payload 压缩操作未正常结束')
+
+    def _dump_chunk(self, chunk_ops, output_path, progress_reporter=None):
+        """Write one slice of install operations with independent file handles.
+
+        Each chunk opens its own read handle on the payload and its own read/write
+        handle on the pre-allocated output image. Because every operation's
+        destination extents are disjoint, threads only seek to separate offsets
+        and never race, so no lock is needed.
+        """
+        with open(self.payload_path, 'rb') as payload_file, open(output_path, 'r+b') as output_file:
+            for data_offset, operation in chunk_ops:
+                self._write_operation(
+                    data_offset, operation, payload_file, output_file, progress_reporter
+                )
 
     def _write_operation(
         self, data_offset, operation, payload_file, output_file, progress_reporter=None
