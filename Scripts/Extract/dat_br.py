@@ -296,36 +296,33 @@ def decompress_dat_batch(infile, flag):
         print(f'> 未发现可用的 {"dat.br" if flag == 2 else "dat"} 文件')
         return
 
-    if not V.JM:
-        label = "dat.br" if flag == 2 else "dat"
-        print(f'\n> 发现以下 {label} 文件：\n')
-        for i, it in enumerate(items, 1):
-            print(f'  {YELLOW}{i:>2} > {GREEN}{os.path.basename(it["path"])}{CLOSE}')
-        print(f'\n{YELLOW}输入要分解的文件名/序号/分区名，all全选，空格分开{CLOSE}')
-        print()
-        tokens = input('> ').split()
-        if not tokens:
+    label = "dat.br" if flag == 2 else "dat"
+    print(f'\n> 发现以下 {label} 文件：\n')
+    for i, it in enumerate(items, 1):
+        print(f'  {YELLOW}{i:>2} > {GREEN}{os.path.basename(it["path"])}{CLOSE}')
+    print(f'\n{YELLOW}输入要分解的文件名/序号/分区名，all全选，空格分开{CLOSE}')
+    print()
+    tokens = input('> ').split()
+    if not tokens:
+        print('> 未选择任何分区')
+        return
+    if 'all' in tokens:
+        selected = items
+    else:
+        selected = []
+        for token in tokens:
+            item = next((it for it in items if it['partition'] == token or os.path.basename(it['path']) == token), None)
+            if item is None and token.isdigit():
+                idx = int(token)
+                if 1 <= idx <= len(items):
+                    item = items[idx - 1]
+            if item is not None and item not in selected:
+                selected.append(item)
+            else:
+                print(f'  {RED}无效输入: {token}{CLOSE}')
+        if not selected:
             print('> 未选择任何分区')
             return
-        if 'all' in tokens:
-            selected = items
-        else:
-            selected = []
-            for token in tokens:
-                item = next((it for it in items if it['partition'] == token or os.path.basename(it['path']) == token), None)
-                if item is None and token.isdigit():
-                    idx = int(token)
-                    if 1 <= idx <= len(items):
-                        item = items[idx - 1]
-                if item is not None and item not in selected:
-                    selected.append(item)
-                else:
-                    print(f'  {RED}无效输入: {token}{CLOSE}')
-            if not selected:
-                print('> 未选择任何分区')
-                return
-    else:
-        selected = items
 
     workers = min(len(selected), os.cpu_count() or 2)
     ok, fail = 0, 0

@@ -85,10 +85,6 @@ def creat_project():
     return True
 
 
-def quiet():
-    V.JM = input('> 是否开启静默 [0/1]: ') == '1'
-
-
 # Project selection and outer menu loop.
 def menu_once():
     load_setup_json()
@@ -257,7 +253,6 @@ def menu_main():
     from Scripts.ReMake.boot import boot_repack
     from Scripts.ReMake.erofs import recompress_erofs
     from Scripts.ReMake.ext4 import recompress_ext4
-    V.JM = True
     while True:
         os.system("clear")
         print(f'\x1b[1;36m> 当前工程: \x1b[0m{V.project}')
@@ -302,7 +297,6 @@ def menu_main():
             infile = glob(V.input + '*.win*')
             for i in glob(V.input + '*.win'):
                 infile.append(i)
-            quiet()
             decompress_win(list(set(sorted(infile))))
         elif int(option) == 6:
             from Scripts.Extract.super import super_selective_main
@@ -314,16 +308,14 @@ def menu_main():
             More.main()
             continue
         elif int(option) in [9, 10, 11]:
-            quiet()
             if int(option) == 9:
                 for file in glob(V.config + '*_kernel.txt'):
                     f_basename = os.path.basename(file).rsplit('_', 1)[0]
                     source = workspace_partition(f_basename)
                     if os.path.isdir(source):
-                        if not V.JM:
-                            display(f'是否合成: {f_basename}.img [1/0]: ', end='')
-                            if input() != '1':
-                                continue
+                        display(f'是否合成: {f_basename}.img [1/0]: ', end='')
+                        if input() != '1':
+                            continue
                         boot_repack(source, V.out)
             for file in glob(V.config + '*_contexts.txt'):
                 f_basename = os.path.basename(file).rsplit('_', 1)[0]
@@ -335,11 +327,10 @@ def menu_main():
                     if not os.path.isfile(infojson):
                         infojson = None
                     if os.path.isfile(contexts) and os.path.isfile(fsconfig):
-                        if not V.JM:
-                            txts = {9: "img", 10: "new.dat", 11: "new.dat.br"}
-                            display(f'是否合成: {f_basename}.{txts.get(int(option), ".new.dat.br")} [1/0]: ', end='')
-                            if input() != '1':
-                                continue
+                        txts = {9: "img", 10: "new.dat", 11: "new.dat.br"}
+                        display(f'是否合成: {f_basename}.{txts.get(int(option), ".new.dat.br")} [1/0]: ', end='')
+                        if input() != '1':
+                            continue
                         if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "1":
                             recompress_erofs(source, fsconfig, contexts, infojson, int(option))
                         else:

@@ -54,7 +54,6 @@ RED, WHITE, CYAN, YELLOW, MAGENTA, GREEN, BOLD, CLOSE = [
 
 # Global mutable state shared by the interactive workflow.
 class GlobalValue(object):
-    JM = False
 
     def __init__(self):
         self.programs = [
