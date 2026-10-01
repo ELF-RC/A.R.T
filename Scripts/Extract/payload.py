@@ -539,15 +539,20 @@ def _decompress_payload_images(payload, payload_dir, mode):
     if mode == '1':
         print(f'> {YELLOW}包含的所有镜像文件: {CLOSE}\n')
         names = [name for name, _ in payload_partitions]
-        # Cell width accounts for ANSI codes: index "N > " (4+2) + name + 2 spaces + size (10).
-        cell_width = max(len(name) for name in names) + 12
+        name_width = max(len(name) for name in names)
+        idx_width = len(str(len(payload_partitions)))
+        head_width = idx_width + 3 + name_width + 2  # "NN > name  "
+        col_width = head_width + 10
         cols = max(1, min(len(payload_partitions),
-                          shutil.get_terminal_size().columns // max(cell_width, 1)))
+                          shutil.get_terminal_size().columns // max(col_width + 2, 1)))
         for index in range(0, len(payload_partitions), cols):
             line = '  '
             for offset in range(index, min(index + cols, len(payload_partitions))):
                 name, size = payload_partitions[offset]
-                cell = f'{offset + 1:>2} > {GREEN}{name}{CLOSE}'.ljust(cell_width) + f'{_human_size(size):>10}'
+                idx_str = f'{offset + 1:>{idx_width}}'
+                colored = f'{YELLOW}{idx_str}{CLOSE} > {GREEN}{name}{CLOSE}'
+                pad = head_width - (len(idx_str) + 3 + len(name))
+                cell = colored + ' ' * pad + f'{_human_size(size):>10}'
                 line += cell
                 if offset + 1 < min(index + cols, len(payload_partitions)):
                     line += '  '
