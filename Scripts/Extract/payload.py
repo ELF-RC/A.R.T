@@ -535,24 +535,24 @@ def _decompress_payload_images(payload, payload_dir, mode):
     if not payload_partitions:
         raise PayloadError('Payload 不包含分区')
 
+    extracted = False
     if mode == '1':
         print(f'> {YELLOW}包含的所有镜像文件: {CLOSE}\n')
-        name_width = max(len(name) for name, _ in payload_partitions) + 4
-        # Adaptive column count so the two-column table fits narrow terminals.
-        terminal_width = shutil.get_terminal_size().columns
-        pair_width = name_width + 12  # name column + 10-char size + 2 spaces
-        cols = 1 if pair_width * 2 > terminal_width else 2
+        names = [name for name, _ in payload_partitions]
+        # Cell width accounts for ANSI codes: index "N > " (4+2) + name + 2 spaces + size (10).
+        cell_width = max(len(name) for name in names) + 12
+        cols = max(1, min(len(payload_partitions),
+                          shutil.get_terminal_size().columns // max(cell_width, 1)))
         for index in range(0, len(payload_partitions), cols):
-            chunk = payload_partitions[index:index + cols]
             line = '  '
-            for offset, (name, size) in enumerate(chunk):
-                cell = f'{offset + index + 1:>2} > {name}'.ljust(name_width + 4) + f'{_human_size(size):>10}'
+            for offset in range(index, min(index + cols, len(payload_partitions))):
+                name, size = payload_partitions[offset]
+                cell = f'{offset + 1:>2} > {GREEN}{name}{CLOSE}'.ljust(cell_width) + f'{_human_size(size):>10}'
                 line += cell
-                if offset < len(chunk) - 1:
+                if offset + 1 < min(index + cols, len(payload_partitions)):
                     line += '  '
             print(line)
         print()
-        names = [name for name, _ in payload_partitions]
         raw = input(
             f'> {RED}输入要分解的镜像名称/序号，all全选，空格分开{CLOSE}\n> {MAGENTA}'
         ).split()
@@ -561,17 +561,24 @@ def _decompress_payload_images(payload, payload_dir, mode):
         elif 'all' in raw:
             for name in names:
                 run(payload, payload_dir, name)
+            extracted = True
         else:
             for token in raw:
                 if token.isdigit() and 1 <= int(token) <= len(names):
                     run(payload, payload_dir, names[int(token) - 1])
+                    extracted = True
                 elif token in names:
                     run(payload, payload_dir, token)
+                    extracted = True
                 else:
                     print(f'> 跳过未知 Payload 分区: {token}')
     else:
         print(f'> {YELLOW}提取【{os.path.basename(payload)}】所有镜像文件:{CLOSE}\n')
         main(payload, payload_dir)
+        extracted = True
+
+    if not extracted:
+        return
 
     images = sorted(glob(os.path.join(payload_dir, '*.img')))
     if input('> 是否继续分解img [0/1]: ').strip() != '1':
