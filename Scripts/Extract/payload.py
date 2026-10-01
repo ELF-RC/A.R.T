@@ -551,8 +551,12 @@ def _decompress_payload_images(payload, payload_dir, mode):
         print()
         names = {name for name, _ in payload_partitions}
         selected = input(
-            f'> {RED}根据以上信息输入一个或多个镜像，以空格分开{CLOSE}\n> {MAGENTA}'
+            f'> {RED}根据以上信息输入一个或多个镜像（all=全部），以空格分开{CLOSE}\n> {MAGENTA}'
         ).split()
+        if 'all' in selected:
+            for name, _ in payload_partitions:
+                run(payload, payload_dir, name)
+            selected = []
         for partition in selected:
             if partition in names:
                 run(payload, payload_dir, partition)
