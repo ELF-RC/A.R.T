@@ -114,7 +114,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
         new_distance,
     ]
 
-    print(f"Process remaking the file system {label}.img ...", end='')
+    print('Process remaking the file system ...', end='')
     mkfs_log = call(mke2fs_cmd, capture=True)
     fs_created = os.path.isfile(new_distance)
     if isinstance(mkfs_log, str):
@@ -122,11 +122,9 @@ def _write_image(state, fsconfig, contexts, source, flag):
             os.remove(new_distance)
         except (OSError, FileNotFoundError):
             pass
-        print(f"\n{RED}Failed !{CLOSE}\n")
-        print('> mke2fs 失败:')
-        print(f'  {mkfs_log}')
+        print(f'\n{RED}Failed !{CLOSE}')
+        print(f'Process log: {mkfs_log}')
         return False
-    tool_log = mkfs_log
     if fs_created:
         e2fs_result = call(e2fsdroid_cmd, capture=True)
         if isinstance(e2fs_result, str):
@@ -135,32 +133,23 @@ def _write_image(state, fsconfig, contexts, source, flag):
                 os.remove(new_distance)
             except (OSError, FileNotFoundError):
                 pass
-            print(f"\n{RED}Failed !{CLOSE}\n")
-            print('> e2fsdroid 失败:')
-            print(f'  {e2fs_result}')
-            if tool_log:
-                print('  mke2fs 日志:')
-                for line in str(tool_log).splitlines():
-                    print(f'    {line}')
+            print(f'\n{RED}Failed !{CLOSE}')
+            print(f'Process log: {e2fs_result}')
             return False
         elif e2fs_result != 0:
             try:
                 os.remove(new_distance)
             except (OSError, FileNotFoundError):
                 pass
-            print(f"\n{RED}Failed !{CLOSE}\n")
-            print(f'  e2fsdroid 退出码: {e2fs_result}')
-            if tool_log:
-                print(f'  mke2fs 日志:')
-                for line in str(tool_log).splitlines():
-                    print(f'    {line}')
+            print(f'\n{RED}Failed !{CLOSE}')
+            print(f'Process log: 退出码 {e2fs_result}')
             return False
         if not os.path.isfile(new_distance):
-            print(f"\n{RED}Failed !{CLOSE}\n")
-            print('> e2fsdroid 未生成目标镜像')
+            print(f'\n{RED}Failed !{CLOSE}')
+            print('Process log: e2fsdroid 未生成目标镜像')
             return False
 
-    print(f"\n{GREEN}Success !{CLOSE}")
+    print(f'\n{GREEN}Success !{CLOSE}')
     if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" or flag > 9:
         print("开始转换: sparse format ...")
         if call(["img2simg", new_distance, distance]) != 0:
