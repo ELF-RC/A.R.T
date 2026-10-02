@@ -6,7 +6,7 @@ import os
 from pathlib import PurePosixPath
 from uuid import UUID
 
-from cachetools import (
+from Scripts.Primary.eeems._vendored.cachetools import (
     LRUCache,
     cachedmethod,
 )

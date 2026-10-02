@@ -13,9 +13,6 @@ from typing import (
     cast,
 )
 
-from crcmod import (
-    mkCrcFun,  # pyright: ignore[reportUnknownVariableType]
-)
 
 if TYPE_CHECKING:
     from .volume import Volume
@@ -52,7 +49,31 @@ SimpleCData = (
     | ctypes.c_int32
     | ctypes.c_int64
 )
-crc32c = cast(Callable[..., int], mkCrcFun(0x11EDC6F41))
+def _make_crc32c():
+    """Build a table-driven CRC-32C (Castagnoli, reflected poly 0x82F63B78)
+    compatible with crcmod's mkCrcFun(0x11EDC6F41) — same signature:
+    crc32c(data, init) -> int. Pure stdlib, no third-party dependency.
+
+    Uses crcmod's non-xor, init=0 semantics:
+        result = init
+        for byte: result = table[(result ^ byte) & 0xFF] ^ (result >> 8)
+    """
+    table = []
+    for byte in range(256):
+        crc = byte
+        for _ in range(8):
+            crc = (crc >> 1) ^ (0x82F63B78 if crc & 1 else 0)
+        table.append(crc)
+
+    def crc32c(data, init=0):
+        value = init
+        for byte in data:
+            value = table[(value ^ byte) & 0xFF] ^ (value >> 8)
+        return value
+
+    return crc32c
+
+crc32c = _make_crc32c()
 
 
 class MagicError(Exception):

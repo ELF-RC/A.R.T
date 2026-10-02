@@ -19,7 +19,7 @@ from typing import (
     final,
 )
 
-from cachetools import (
+from Scripts.Primary.eeems._vendored.cachetools import (
     LRUCache,
     cachedmethod,
 )

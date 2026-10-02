@@ -12,11 +12,14 @@ from typing import (
     runtime_checkable,
 )
 
-if sys.version_info < (3, 12):
-    from typing_extensions import override
+if sys.version_info >= (3, 12):
+    from typing import override
 
 else:
-    from typing import override
+    # typing.override is 3.12+; fall back to a no-op decorator so the
+    # parser keeps working without the typing_extensions dependency.
+    def override(func):
+        return func
 
 
 @runtime_checkable

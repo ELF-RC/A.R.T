@@ -9,5 +9,3 @@ zstandard
 
 # Eeems ext4 parser (Scripts/Primary/eeems)
 cachetools
-crcmod
-typing_extensions
