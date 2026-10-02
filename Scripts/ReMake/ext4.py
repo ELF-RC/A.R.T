@@ -48,7 +48,7 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
     )
     fsize = None
     if dumpinfo:
-        fsize, dsize, _inodes, _old_block_size, _old_blocks, _per_group, mount_point = (
+        fsize, dsize, _inodes, _old_block_size, _old_blocks, _per_group, _mount_point = (
             load_image_json(dumpinfo, source)
         )
         size = dsize
@@ -56,9 +56,6 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         size = get_dir_size(source, 1.3)
         if int(size) <= 1048576:
             size = 1048576
-        mount_point = "/" if os.path.isfile(
-            os.path.join(source, "system", "build.prop")
-        ) else f"/{label}"
 
     block_size = 4096
     blocks = ceil(int(size) / block_size)
@@ -73,7 +70,6 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         "timestamp": timestamp,
         "size": size,
         "read_mode": read_mode,
-        "mount_point": mount_point,
         "blocks": blocks,
     }
 
@@ -92,7 +88,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
         "-I",
         "256",
         "-M",
-        state["mount_point"],
+        f"/{label}",
         "-m",
         "0",
         "-t",
@@ -126,13 +122,32 @@ def _write_image(state, fsconfig, contexts, source, flag):
             os.remove(new_distance)
         except (OSError, FileNotFoundError):
             pass
+        print(f"\n{RED}Failed !{CLOSE}\n")
+        print('> mke2fs 失败:')
+        print(f'  {mkfs_log}')
+        return False
     tool_log = mkfs_log
-    e2fs_log = ''
     if fs_created:
         e2fs_result = call(e2fsdroid_cmd, capture=True)
         if isinstance(e2fs_result, str):
-            e2fs_log = e2fs_result
+            # e2fsdroid returned an error log: drop the half-packed image.
+            try:
+                os.remove(new_distance)
+            except (OSError, FileNotFoundError):
+                pass
+            print(f"\n{RED}Failed !{CLOSE}\n")
+            print('> e2fsdroid 失败:')
+            print(f'  {e2fs_result}')
+            if tool_log:
+                print('  mke2fs 日志:')
+                for line in str(tool_log).splitlines():
+                    print(f'    {line}')
+            return False
         elif e2fs_result != 0:
+            try:
+                os.remove(new_distance)
+            except (OSError, FileNotFoundError):
+                pass
             print(f"\n{RED}Failed !{CLOSE}\n")
             print(f'  e2fsdroid 退出码: {e2fs_result}')
             if tool_log:
@@ -144,11 +159,6 @@ def _write_image(state, fsconfig, contexts, source, flag):
             print(f"\n{RED}Failed !{CLOSE}\n")
             print('> e2fsdroid 未生成目标镜像')
             return False
-    else:
-        print(f"\n{RED}Failed !{CLOSE}\n")
-        print('> mke2fs 失败:')
-        print(f'  {tool_log}')
-        return False
 
     print(f"\n{GREEN}Success !{CLOSE}")
     if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" or flag > 9:
