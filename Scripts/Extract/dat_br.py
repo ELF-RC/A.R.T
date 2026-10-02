@@ -199,8 +199,6 @@ def decompress_dat(transfer, source, distance=None, keep=0):
     combined = None
     raw_image = None
     try:
-        import time as _time
-        s_time = _time.time()
         partition = partition_name(source)
         combined = _combine_fragments(source)
         raw_image = os.path.join(V.workspace, f'{partition}.img')
@@ -209,7 +207,6 @@ def decompress_dat(transfer, source, distance=None, keep=0):
         _sdat2img_main(transfer, combined, raw_image)
         if not os.path.isfile(raw_image):
             raise SdatError('未生成 raw image')
-        print("\x1b[1;32m [%ds]\x1b[0m" % (_time.time() - s_time))
         decompress_img(raw_image, workspace_partition(partition))
     except (LayoutError, OSError, ValueError, SdatError) as error:
         print(f'> DAT 分解失败: {error}')
@@ -233,8 +230,6 @@ def decompress_bro(transfer, source, distance=None, keep=0):
     combined = None
     staged_dat = None
     try:
-        import time as _time
-        s_time = _time.time()
         combined = _combine_fragments(source)
         if not combined.endswith('.br'):
             raise LayoutError(f'BROTLI 文件扩展名无效: {combined}')
@@ -245,7 +240,6 @@ def decompress_bro(transfer, source, distance=None, keep=0):
             raise LayoutError('brotli 解压失败')
         if not os.path.isfile(staged_dat):
             raise LayoutError('brotli 未生成 new.dat')
-        print("\x1b[1;32m [%ds]\x1b[0m" % (_time.time() - s_time))
         decompress_dat(transfer, staged_dat)
     except (LayoutError, OSError) as error:
         print(f'> BROTLI 分解失败: {error}')
