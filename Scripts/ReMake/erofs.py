@@ -43,7 +43,7 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
     # (and symlink targets with them); non-ASCII names are left as-is.
     rewrites = sanitize_metadata_files(fsconfig, contexts)
     if rewrites:
-        write_map_file(os.path.join(V.out, f'{label}_special.txt'), rewrites)
+        write_map_file(os.path.join(V.out, f'{label}_special'), rewrites)
 
     timestamp = (
         int(time.time())
