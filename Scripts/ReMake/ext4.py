@@ -114,7 +114,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
         new_distance,
     ]
 
-    print('Process remaking the file system ...', end='')
+    print('Process remaking the file system...', end='')
     mkfs_log = call(mke2fs_cmd, capture=True)
     fs_created = os.path.isfile(new_distance)
     if isinstance(mkfs_log, str):
