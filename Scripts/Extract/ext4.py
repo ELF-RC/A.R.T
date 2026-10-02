@@ -57,6 +57,31 @@ def _mode_str(i_mode):
     return f'{perm:04o}'
 
 
+def _ascii_name(name):
+    """ASCII-safe form of a path component for fs_config / file_contexts.
+
+    e2fsdroid and mkfs.erofs only accept ASCII in their config files:
+    non-ASCII characters are escaped to \\uXXXX, matching how Android's
+    fs_config_dirs / file_contexts represent such names on disk.
+    """
+    out = []
+    for char in name:
+        code = ord(char)
+        if code < 0x80:
+            out.append(char)
+        else:
+            out.append(f'\\u{code:04x}')
+    return ''.join(out)
+
+
+def _on_disk_component(name):
+    """The component name actually written to disk. Spaces become
+    underscores (the repacker cannot address paths containing a space in
+    fs_config); other characters are kept as-is. A mapping of every
+    rewritten path is recorded in space.txt so repack can restore it."""
+    return name.replace(' ', '_')
+
+
 # High-level EXT4 extraction and metadata generation facade.
 class ULTRAMAN(object):
 
@@ -235,13 +260,16 @@ class ULTRAMAN(object):
         seen_targets = set()
 
         def output_path(components):
+            # components are the *original* on-disk names; only reject path
+            # separators / traversal, not spaces or unicode (spaces are
+            # rewritten to underscores on disk, unicode kept as-is).
             if not components or any(
                 not component or component in {'.', '..'} or '/' in component or '\\' in component
-                or any(character.isspace() for character in component) or '"' in component
                 for component in components
             ):
                 raise ImageExtractionError(f'EXT4 包含无法安全表示的路径: {components!r}')
-            target = output_root.joinpath(*components)
+            on_disk = tuple(_on_disk_component(component) for component in components)
+            target = output_root.joinpath(*on_disk)
             try:
                 target.relative_to(output_root)
             except ValueError as error:
@@ -289,8 +317,17 @@ class ULTRAMAN(object):
                     raise ImageExtractionError(f'EXT4 文件权限无效: {entry_name!r}')
                 uid = int(entry_inode.i_uid)
                 gid = int(entry_inode.i_gid)
-                relative_path = '/'.join(entry_components)
-                fs_path = f'{self.FileName}/{relative_path}'
+                # On-disk names use underscored components; the repacker reads
+                # fs_config paths as ASCII. fs_path combines both: underscore
+                # for spaces, \uXXXX escapes for non-ASCII bytes.
+                on_disk_components = tuple(_on_disk_component(c) for c in entry_components)
+                fs_path = f'{self.FileName}/' + '/'.join(_ascii_name(c) for c in on_disk_components)
+                # space.txt records every path that the on-disk / fs_config
+                # form rewrote (space->underscore or non-ASCII escape), so
+                # repack can restore the original names.
+                rewritten = _on_disk_component(entry_name) != entry_name or _ascii_name(_on_disk_component(entry_name)) != _on_disk_component(entry_name)
+                if rewritten:
+                    self.space.append('/'.join(entry_components))
                 cap = ''
                 link_target = ''
                 for attribute, value in entry_inode.xattrs:
