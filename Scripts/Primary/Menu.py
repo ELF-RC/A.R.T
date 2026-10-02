@@ -313,44 +313,40 @@ def menu_main():
             More.main()
             continue
         elif int(option) in [9, 10, 11]:
-            from Scripts.Primary.WorkSpace import load_global_info
+            from Scripts.Primary.WorkSpace import load_global_info, partition_metadata_names
             info = load_global_info(V.config)
-            candidates = []  # (f_basename, source_dir, fsconfig, contexts, infojson)
+            infojson = V.config + 'info.json'
+            if not os.path.isfile(infojson):
+                infojson = None
+            candidates = []  # (f_basename, source_dir, fsconfig, contexts, is_kernel)
 
-            for file in glob(V.config + '*_file_contexts'):
-                f_basename = os.path.basename(file).rsplit('_', 1)[0]
+            for f_basename, rec in sorted(info.items()):
                 source = workspace_partition(f_basename)
-                fsconfig = V.config + f_basename + '_fs_config'
-                # 非 kernel 分区：需要 info.json 有该分区条目 + WORKSPACE 目录存在
-                if f_basename not in info:
-                    continue
                 if not os.path.isdir(source):
                     continue
-                candidates.append((f_basename, source, fsconfig, file, V.config + 'info.json'))
-
-            if int(option) == 9:
-                # kernel 类：info.json 有条目 + WORKSPACE 目录存在
-                for f_basename, rec in sorted(info.items()):
-                    if not (isinstance(rec, dict) and rec.get('type') == 'kernel'):
+                is_kernel = isinstance(rec, dict) and rec.get('type') == 'kernel'
+                if is_kernel:
+                    # boot 只合成 .img，仅 option 9 提供
+                    if int(option) != 9:
                         continue
-                    source = workspace_partition(f_basename)
-                    if not os.path.isdir(source):
+                    candidates.append((f_basename, source, None, None, True))
+                else:
+                    contexts, fsconfig, _ = partition_metadata_names(f_basename)
+                    contexts = V.config + contexts
+                    fsconfig = V.config + fsconfig
+                    if not (os.path.isfile(contexts) and os.path.isfile(fsconfig)):
                         continue
-                    candidates.append((f_basename, source, None, None, None))
+                    candidates.append((f_basename, source, fsconfig, contexts, False))
 
             if not candidates:
                 print('> 当前工程内未找到可合成的分区镜像')
                 continue
-            for f_basename, source, fsconfig, contexts, infojson in candidates:
-                if int(option) == 9 and fsconfig is None:
-                    # kernel 分区 → boot repack
+            for f_basename, source, fsconfig, contexts, is_kernel in candidates:
+                if is_kernel:
                     print(f'是否合成: {f_basename}.img [1/0]: ', end='')
                     if input() != '1':
                         continue
                     boot_repack(source, V.out)
-                    continue
-                # 非 kernel：需要 fsconfig + contexts 文件都存在
-                if not (os.path.isfile(contexts) and os.path.isfile(fsconfig)):
                     continue
                 txts = {9: "img", 10: "new.dat", 11: "new.dat.br"}
                 print(f'是否合成: {f_basename}.{txts.get(int(option), ".new.dat.br")} [1/0]: ', end='')
