@@ -79,8 +79,20 @@ def _write_image(state, fsconfig, contexts, source, flag):
     label = state["label"]
     distance = state["distance"]
     new_distance = state["new_distance"]
+    # Count inodes the new filesystem must hold: every file, directory, and
+    # symlink under the source tree occupies one inode, plus the partition
+    # root itself (os.walk never lists it as a member of dirs/files, so it
+    # would be missed without the +1). Symlinks appear in dirs or files and
+    # are not followed, so each is counted exactly once. A small margin
+    # absorbs lost+found and minor post-extract edits.
+    inode_count = 1
+    for _root, dirs, files in os.walk(source):
+        inode_count += len(dirs) + len(files)
+    inode_count += 64
     mke2fs_cmd = [
         "mke2fs",
+        "-N",
+        str(inode_count),
         "-O",
         "^has_journal,^metadata_csum,extent,huge_file,^flex_bg,^64bit,uninit_bg,dir_nlink,extra_isize",
         "-L",
