@@ -78,7 +78,7 @@ def extract_erofs(working_source, partition, destination):
     destination = Path(destination)
     workspace = _runtime_path('workspace', destination.parent)
     config_dir = _runtime_path('config', workspace / 'config')
-    print(f'正在分解: {source.name} <erofs>')
+    print('Process is releasing the file...')
     try:
         if source.is_symlink() or not source.is_file():
             raise LayoutError(f'EROFS 输入镜像无效: {source}')
@@ -89,9 +89,15 @@ def extract_erofs(working_source, partition, destination):
             config_dir, partition,
             {'size': source.stat().st_size, 'type': 'erofs'},
         )
-        if call(['extract.erofs', '-i', str(source), '-o', str(workspace), '-x']) != 0:
-            print('> EROFS 分解失败')
+        result = call(
+            ['extract.erofs', '-i', str(source), '-o', str(workspace), '-x'],
+            capture=True,
+        )
+        if result != 0:
+            print('失败：Failed !')
+            print(f'Process log: {result}')
             return False
+        print('成功：Success !')
         if not _normalize_erofs_metadata(partition, config_dir):
             return False
         return _commit_extracted_partition(
