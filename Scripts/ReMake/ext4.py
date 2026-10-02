@@ -29,6 +29,39 @@ def walk_contexts(path):
         target.writelines(lines)
 
 
+# Compute an ext4 image size that fits the source tree plus metadata.
+def _ext4_image_size(source, block_size=4096):
+    """Size an ext4 image to hold the source tree plus ext4 metadata.
+
+    get_dir_size counts only file bytes; ext4 also needs directory-entry
+    blocks (one per directory), the inode table (256 B per entry), and
+    per-group bitmaps/GDT/superblock backups. Without those, small or
+    file-dense partitions exhaust data blocks ("Could not allocate block")
+    even when the raw byte count looks ample.
+    """
+    data_blocks = 0
+    dir_count = 0
+    entry_count = 1  # the partition root itself
+    for _root, dirs, files in os.walk(source):
+        dir_count += len(dirs)
+        entry_count += len(dirs) + len(files)
+        for name in files:
+            path = os.path.join(_root, name)
+            if not os.path.islink(path):
+                try:
+                    data_blocks += ceil(os.path.getsize(path) / block_size)
+                except OSError:
+                    pass
+    # Each directory occupies at least one block of directory entries.
+    dir_blocks = dir_count
+    # Inode table: 256 bytes per inode, one inode per filesystem entry.
+    inode_blocks = ceil(entry_count * 256 / block_size)
+    # 10% margin for per-group metadata, extent trees, and slack; +64 for
+    # lost+found and minor post-extract edits.
+    total_blocks = ceil((data_blocks + dir_blocks + inode_blocks) * 1.1) + 64
+    return max(total_blocks * block_size, 1048576)
+
+
 # Prepare sizes, timestamps, metadata, and output paths.
 def _prepare(source, fsconfig, contexts, dumpinfo):
     label = os.path.basename(source)
@@ -46,16 +79,15 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         if V.SETUP_MANIFEST["UTC"].lower() == "live"
         else V.SETUP_MANIFEST["UTC"]
     )
+    # fsize (original image size, if known) only selects ro/rw for the
+    # banner; the filesystem size is computed from the live source tree so
+    # it always fits data + ext4 metadata.
     fsize = None
     if dumpinfo:
-        fsize, dsize, _inodes, _old_block_size, _old_blocks, _per_group, _mount_point = (
+        fsize, _dsize, _inodes, _old_block_size, _old_blocks, _per_group, _mount_point = (
             load_image_json(dumpinfo, source)
         )
-        size = dsize
-    else:
-        size = get_dir_size(source, 1.3)
-        if int(size) <= 1048576:
-            size = 1048576
+    size = _ext4_image_size(source)
 
     block_size = 4096
     blocks = ceil(int(size) / block_size)
