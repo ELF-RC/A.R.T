@@ -317,13 +317,13 @@ def menu_main():
                         if input() != '1':
                             continue
                         boot_repack(source, V.out)
-            for file in glob(V.config + '*_contexts.txt'):
+            for file in glob(V.config + '*_file_contexts.txt'):
                 f_basename = os.path.basename(file).rsplit('_', 1)[0]
                 source = workspace_partition(f_basename)
                 if os.path.isdir(source):
-                    fsconfig = V.config + f_basename + '_fsconfig.txt'
-                    contexts = V.config + f_basename + '_contexts.txt'
-                    infojson = V.config + f_basename + '_info.txt'
+                    fsconfig = V.config + f_basename + '_fs_config.txt'
+                    contexts = V.config + f_basename + '_file_contexts.txt'
+                    infojson = V.config + f_basename + '_info.json'
                     if not os.path.isfile(infojson):
                         infojson = None
                     if os.path.isfile(contexts) and os.path.isfile(fsconfig):
