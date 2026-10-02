@@ -280,14 +280,14 @@ def menu_main():
 
         if option == 0:
             return
-        if option in menu_actions:
-            menu_actions[option]()
-        elif option in {1, 2, 3, 4, 5, 6, 9, 10, 11}:
-            # Stale info.json entries (missing WORKSPACE/<partition>/) are
-            # pruned before any extract/repack flow touches them.
+        # Stale info.json entries (missing WORKSPACE/<partition>/) are
+        # pruned before any extract/repack flow touches them.
+        if option in {1, 2, 3, 4, 5, 6, 9, 10, 11}:
             from Scripts.Primary.WorkSpace import prune_global_info
             prune_global_info(V.config, V.layout)
-        if option == 1:
+        if option in menu_actions:
+            menu_actions[option]()
+        elif option == 1:
             infile = V.input + 'payload.bin'
             if not os.path.exists(infile):
                 input("未发现Payload.Bin")
