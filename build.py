@@ -78,9 +78,25 @@ def main() -> None:
     for path in (BUILD_DIR, DIST_DIR, RELEASE_DIR):
         remove_generated_path(path)
 
-    # Step 2: PyInstaller (verbose output goes to build-call.log)
+    # Step 2: Compile with PyInstaller.
     _log('2/4', 'Compiling with PyInstaller...')
     import subprocess
+
+    # Install build + runtime deps into the active interpreter first, so the
+    # bundled parser (Eeems, PyInstaller, runtime libs) is available to the
+    # compiler. Vendored pure-python deps need no install; requirements.txt
+    # still pins the ones PyInstaller must collect.
+    _log('2/4', 'Installing Python dependencies...')
+    install_result = subprocess.run(
+        [sys.executable, '-m', 'pip', 'install', '-r', str(ROOT / 'requirements.txt'),
+         '--quiet'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if install_result.returncode != 0:
+        print(f'\n  [ERROR] pip install failed:\n{install_result.stdout}', file=sys.stderr)
+        sys.exit(1)
 
     log_file = ROOT / 'build-call.log'
     result = subprocess.run(
