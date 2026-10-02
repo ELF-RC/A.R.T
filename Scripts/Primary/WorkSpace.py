@@ -241,14 +241,12 @@ def workspace_temp(category):
 # Metadata filename conventions.
 def partition_metadata_names(partition):
     return (
-        f'{partition}_file_contexts.txt',
-        f'{partition}_fs_config.txt',
-        f'{partition}_info.json',
-        f'{partition}_special.txt',
-        f'{partition}_size.txt',
-        f'{partition}_kernel.txt',
         f'{partition}_file_contexts',
         f'{partition}_fs_config',
+        f'{partition}_info.json',
+        f'{partition}_special',
+        f'{partition}_size.txt',
+        f'{partition}_kernel.txt',
     )
 
 

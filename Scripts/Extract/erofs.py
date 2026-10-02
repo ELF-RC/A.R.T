@@ -44,8 +44,8 @@ def _normalize_erofs_metadata(partition: str, config_dir: Path) -> bool:
         raise LayoutError(f'{partition} 的 EROFS metadata 目录无效: {config_dir}')
     raw_contexts = _metadata_path(config_dir, partition, '_file_contexts')
     raw_fsconfig = _metadata_path(config_dir, partition, '_fs_config')
-    contexts = _metadata_path(config_dir, partition, '_file_contexts.txt')
-    fsconfig = _metadata_path(config_dir, partition, '_fs_config.txt')
+    contexts = _metadata_path(config_dir, partition, '_file_contexts')
+    fsconfig = _metadata_path(config_dir, partition, '_fs_config')
     if raw_contexts.is_symlink() or raw_fsconfig.is_symlink():
         raise LayoutError(f'{partition} 的 EROFS metadata 不能是符号链接')
     if not (raw_contexts.is_file() and raw_fsconfig.is_file()):
@@ -93,8 +93,8 @@ def extract_erofs(working_source, partition, destination):
             partition,
             config_dir,
             {
-                f'{partition}_file_contexts.txt',
-                f'{partition}_fs_config.txt',
+                f'{partition}_file_contexts',
+                f'{partition}_fs_config',
                 f'{partition}_size.txt',
             },
         )
