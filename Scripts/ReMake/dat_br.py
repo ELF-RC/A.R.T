@@ -1175,11 +1175,27 @@ def _image_to_dat(input_image, outdir='.', version=None, prefix='system'):
         os.makedirs(outdir)
 
     output_prefix = outdir + '/' + prefix
-    BlockImageDiff(
-        SparseMap.SparseImage(input_image, tempfile.mkstemp()[1], '0'),
-        None,
-        version,
-    ).Compute(output_prefix)
+    # file_map_fn is an empty placeholder: LoadFileBlockMap reads no entries
+    # from it and derives zero/nonzero groups from the sparse image instead.
+    # Close mkstemp's fd immediately and unlink the file after use to avoid
+    # fd + temp-file leaks on every DAT/BR repack.
+    map_fd, map_path = tempfile.mkstemp(prefix='art-filemap-')
+    os.close(map_fd)
+    try:
+        sparse = SparseMap.SparseImage(input_image, map_path, '0')
+        try:
+            BlockImageDiff(sparse, None, version).Compute(output_prefix)
+        finally:
+            # SparseImage keeps the image fd open for the diff lifetime.
+            try:
+                sparse.simg_f.close()
+            except (AttributeError, OSError):
+                pass
+    finally:
+        try:
+            os.unlink(map_path)
+        except OSError:
+            pass
 
     print('Done! Output files: %s' % os.path.dirname(output_prefix))
 

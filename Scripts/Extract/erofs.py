@@ -37,23 +37,24 @@ def _metadata_path(config_dir: Path, partition: str, suffix: str) -> Path:
     return config_dir / f'{partition}{suffix}'
 
 
-# Rename EROFS metadata into project naming.
+# Verify EROFS extractor metadata exists with the project's canonical names.
 def _normalize_erofs_metadata(partition: str, config_dir: Path) -> bool:
-    """Rename extractor metadata to A.R.T's canonical names."""
+    """Validate EROFS metadata files are present and regular.
+
+    extract.erofs -x already emits <partition>_file_contexts and
+    <partition>_fs_config into the config directory, so no rename is
+    needed — this checks their presence and that they are not symlinks.
+    """
     config_dir = config_dir.resolve()
     if config_dir.is_symlink() or not config_dir.is_dir():
         raise LayoutError(f'{partition} 的 EROFS metadata 目录无效: {config_dir}')
-    raw_contexts = _metadata_path(config_dir, partition, '_file_contexts')
-    raw_fsconfig = _metadata_path(config_dir, partition, '_fs_config')
     contexts = _metadata_path(config_dir, partition, '_file_contexts')
     fsconfig = _metadata_path(config_dir, partition, '_fs_config')
-    if raw_contexts.is_symlink() or raw_fsconfig.is_symlink():
+    if contexts.is_symlink() or fsconfig.is_symlink():
         raise LayoutError(f'{partition} 的 EROFS metadata 不能是符号链接')
-    if not (raw_contexts.is_file() and raw_fsconfig.is_file()):
+    if not (contexts.is_file() and fsconfig.is_file()):
         print(f'> {partition} 的 EROFS metadata 不完整，已保留临时工作现场')
         return False
-    os.replace(raw_contexts, contexts)
-    os.replace(raw_fsconfig, fsconfig)
     return True
 
 
