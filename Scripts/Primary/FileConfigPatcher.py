@@ -7,71 +7,133 @@ from collections import deque
 # ---------------------------------------------------------------------------
 # fsconfig / file_contexts sanitization
 # ---------------------------------------------------------------------------
-# The Android packers (e2fsdroid, mkfs.erofs) only accept ASCII in their
-# config files, and their line parsers are whitespace-sensitive:
-#   - fsconfig:  "path uid gid [mode [capabilities=... [link_target]]]"
-#   - contexts:  "path-regex u:object_r:label:s0"
-# Non-ASCII path bytes break both parsers outright, and a space inside the
-# path column misaligns the uid/gid columns. sanitize_metadata_files()
-# rewrites such path fields to ASCII \uXXXX form, and records every
-# rewrite in a companion .map file so a later repack step can restore the
-# original names.
+# The Android repackers (e2fsdroid, mkfs.erofs) match fsconfig / file_contexts
+# paths against the source tree by *literal* path: an entry whose path does not
+# exist on disk is reported "failed to find" and its files are skipped — the
+# repacked image then silently loses them. So every config path has to equal
+# the real on-disk name.
+#
+# The one case that desyncs config and disk is a *space*: the ext4 extractor
+# rewrites "sp dir" -> "sp_dir" on disk (recorded in space.txt), while a
+# config generated elsewhere (the erofs unpacker keeps original names, copied
+# fs_config keeps the original string) may still say "sp dir". This module
+# rewrites exactly that case — space -> underscore — in fsconfig paths,
+# symlink targets, and context regexes, and logs every rewrite in a companion
+# map file so the original name is never lost.
+#
+# Non-ASCII names are intentionally left as-is: they are valid UTF-8 on disk,
+# the repacker accepts them, and escaping them to \\uXXXX form breaks the
+# literal match (the old behaviour, which dropped every non-ASCII entry on
+# repack). \\uXXXX is only meaningful to the AOSP build-time fs_config
+# generator, not to e2fsdroid / mkfs.erofs.
 def _escape_component(component):
-    """ASCII-safe form of one fsconfig / contexts path component.
+    """Packer-safe form of one fsconfig / contexts path component.
 
-    Every byte >= 0x80 becomes \\uXXXX; ASCII characters are kept as-is
-    (SELinux special characters in contexts are already escaped by the
-    extractor, so they need no second pass here).
+    Spaces are rewritten to underscores (the on-disk tree and the space-aware
+    column parser both need them gone); every other character, including
+    non-ASCII, is kept verbatim so the path still matches the repacker's
+    literal lookup.
     """
-    out = []
-    for char in component:
-        code = ord(char)
-        if code < 0x80:
-            out.append(char)
-        else:
-            out.append('\\u%04x' % code)
-    return ''.join(out)
+    return component.replace(' ', '_')
 
 
-def _sanitize_one_line(line, rewrites):
-    """Return the sanitized line; record the original path field when changed."""
+def _sanitize_fsconfig_line(line, rewrites):
+    """Packer-safe rewrite of one fsconfig line (path + optional target).
+
+    Column order: `path uid gid [mode [capabilities=... [target]]]`.
+    Spaces in the path or target columns would desync the config from
+    the on-disk tree (which uses underscored components), so they are
+    rewritten to underscores.
+
+    Parsing: the first space-delimited word is the path column; the
+    fixed columns (uid, gid, mode, capabilities=) follow it verbatim.
+    A symlink target, when present, is the *last* logical field and may
+    contain spaces — it is recovered by taking everything to the right
+    of the fixed-column block and joining it back with single spaces.
+    Spaces in the path column are rewritten to underscores.
+    """
     stripped = line.rstrip('\n')
     if not stripped:
         return line
-    fields = stripped.split(' ')
-    if len(fields) < 2:
-        # fsconfig: "path uid ..." | contexts: "path label"
-        # path is the first field in both layouts.
-        pass
-    original_path = fields[0]
-    escaped = _escape_component(original_path)
-    if escaped != original_path:
-        rewrites.append(original_path)
-    if len(fields) == 1:
-        return escaped + '\n'
-    rest = fields[1:]
-    return escaped + ' ' + ' '.join(rest) + '\n'
+    tokens = stripped.split(' ')
+    # path is the leftmost word (guaranteed space-free by extraction,
+    # which underscored it on disk; a copied config with a raw space is
+    # handled by the target logic below, since the repacker would have
+    # already desynced that entry).
+    path = tokens[0]
+    # fixed columns: walk from index 1 collecting numeric / 4-digit-octal
+    # / capabilities= tokens in order; the first non-fixed token starts
+    # the symlink target (may span multiple words).
+    i = 1
+    fixed = []
+    while i < len(tokens):
+        t = tokens[i]
+        if t.isdigit() or (len(t) == 4 and all(c in '01234567' for c in t)) \
+                or t.startswith('capabilities='):
+            fixed.append(t)
+            i += 1
+        else:
+            break
+    target = ' '.join(tokens[i:])
+    escaped_path = _escape_component(path)
+    escaped_target = _escape_component(target)
+    if escaped_path != path:
+        rewrites.append(path)
+    if escaped_target != target:
+        rewrites.append(target)
+    parts = [escaped_path] + fixed + ([escaped_target] if target else [])
+    return ' '.join(p for p in parts if p) + '\n'
+
+
+
+def _sanitize_contexts_line(line, rewrites):
+    """Packer-safe rewrite of one file_contexts line (path-regex + label).
+
+    Layout: "path-regex u:object_r:label:s0" — exactly one space separates
+    the two fields. The regex may contain escaped specials but no raw
+    spaces (a space inside it would be misread as the field separator), so
+    spaces become underscores — matching the underscored on-disk tree. A
+    single rsplit is safe either way.
+    """
+    stripped = line.rstrip('\n')
+    if not stripped:
+        return line
+    parts = stripped.rsplit(' ', 1)
+    if len(parts) == 1:
+        path, label = parts[0], ''
+    else:
+        path, label = parts
+    escaped_path = _escape_component(path)
+    new_line = (escaped_path + ' ' + label + '\n') if label else escaped_path + '\n'
+    if new_line.rstrip('\n') != stripped:
+        rewrites.append(path)
+    return new_line
+
+
+def _sanitize_file(path, sanitize_line, rewrites):
+    if not os.path.isfile(path):
+        return
+    with open(path, 'r', encoding='utf-8') as source:
+        lines = source.readlines()
+    new_lines = [sanitize_line(line, rewrites) for line in lines]
+    if any(old.rstrip('\n') != new.rstrip('\n') for old, new in zip(lines, new_lines)):
+        with open(path, 'w', encoding='utf-8', newline='\n') as target:
+            target.writelines(new_lines)
 
 
 def sanitize_metadata_files(fsconfig_path, contexts_path):
-    """ASCII-sanitize the path column of fsconfig / file_contexts in place.
+    """Packer-safe rewrite of fsconfig / file_contexts path columns.
 
-    fsconfig lines look like "path uid gid mode [cap] [link]" and contexts
-    lines look like "path-regex label"; in both the first column is the path
-    and every other column is preserved verbatim. Returns the list of
-    original path fields that were rewritten (empty when already safe).
+    Spaces become underscores (the on-disk tree was written with
+    underscored components); non-ASCII characters are kept verbatim so
+    the paths still match the repacker's literal lookup. The
+    uid/gid/mode/capabilities/label columns are preserved verbatim.
+    Returns the deduplicated, order-preserved list of original tokens
+    that were rewritten.
     """
     rewrites = []
-    for path in (fsconfig_path, contexts_path):
-        if not os.path.isfile(path):
-            continue
-        with open(path, 'r', encoding='utf-8') as source:
-            lines = source.readlines()
-        new_lines = [_sanitize_one_line(line, rewrites) for line in lines]
-        if any(old.rstrip('\n') != new.rstrip('\n') for old, new in zip(lines, new_lines)):
-            with open(path, 'w', encoding='utf-8', newline='\n') as target:
-                target.writelines(new_lines)
-    # Deduplicate while preserving order.
+    _sanitize_file(fsconfig_path, _sanitize_fsconfig_line, rewrites)
+    _sanitize_file(contexts_path, _sanitize_contexts_line, rewrites)
     seen = set()
     unique = []
     for item in rewrites:

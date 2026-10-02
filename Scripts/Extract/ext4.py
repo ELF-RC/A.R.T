@@ -57,23 +57,6 @@ def _mode_str(i_mode):
     return f'{perm:04o}'
 
 
-def _ascii_name(name):
-    """ASCII-safe form of a path component for fs_config / file_contexts.
-
-    e2fsdroid and mkfs.erofs only accept ASCII in their config files:
-    non-ASCII characters are escaped to \\uXXXX, matching how Android's
-    fs_config_dirs / file_contexts represent such names on disk.
-    """
-    out = []
-    for char in name:
-        code = ord(char)
-        if code < 0x80:
-            out.append(char)
-        else:
-            out.append(f'\\u{code:04x}')
-    return ''.join(out)
-
-
 def _on_disk_component(name):
     """The component name actually written to disk. Spaces become
     underscores (the repacker cannot address paths containing a space in
@@ -317,16 +300,18 @@ class ULTRAMAN(object):
                     raise ImageExtractionError(f'EXT4 文件权限无效: {entry_name!r}')
                 uid = int(entry_inode.i_uid)
                 gid = int(entry_inode.i_gid)
-                # On-disk names use underscored components; the repacker reads
-                # fs_config paths as ASCII. fs_path combines both: underscore
-                # for spaces, \uXXXX escapes for non-ASCII bytes.
-                on_disk_components = tuple(_on_disk_component(c) for c in entry_components)
-                fs_path = f'{self.FileName}/' + '/'.join(_ascii_name(c) for c in on_disk_components)
-                # space.txt records every path that the on-disk / fs_config
-                # form rewrote (space->underscore or non-ASCII escape), so
-                # repack can restore the original names.
-                rewritten = _on_disk_component(entry_name) != entry_name or _ascii_name(_on_disk_component(entry_name)) != _on_disk_component(entry_name)
-                if rewritten:
+                # fs_config paths must match the on-disk tree exactly, because the
+                # repacker (e2fsdroid / mkfs.erofs) matches them by literal path:
+                # spaces are already underscored on disk, non-ASCII names are
+                # kept as-is. Rewriting either here would desync the config from
+                # the tree and drop files on repack.
+                fs_path = f'{self.FileName}/' + '/'.join(
+                    _on_disk_component(c) for c in entry_components
+                )
+                # space.txt records every path whose name was rewritten on disk
+                # (space -> underscore), so repack can restore the original
+                # names.
+                if _on_disk_component(entry_name) != entry_name:
                     self.space.append('/'.join(entry_components))
                 cap = ''
                 link_target = ''

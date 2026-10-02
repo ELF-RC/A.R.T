@@ -38,8 +38,9 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
     patch_fsconfig(source, fsconfig)
     walk_contexts(fsconfig)
     walk_contexts(contexts)
-    # The Android packers (mkfs.erofs) only accept ASCII in fsconfig /
-    # file_contexts; rewrite non-ASCII path columns and log the mapping.
+    # mkfs.erofs matches fs_config paths against the source tree literally,
+    # so space-bearing entries are aligned to the underscored on-disk form
+    # (and symlink targets with them); non-ASCII names are left as-is.
     rewrites = sanitize_metadata_files(fsconfig, contexts)
     if rewrites:
         write_map_file(os.path.join(V.out, f'{label}_space.txt'), rewrites)
