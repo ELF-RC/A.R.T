@@ -30,12 +30,6 @@ from Scripts.Primary.ImageTools import sparse_to_raw
 
 EXT4_RAW_HEADER_MAGIC = 0xED26FF3A
 
-# Mode bits for stat-style "rwxr-xr-x" rendering.
-_S_ISGID = 0o2000
-_S_ISUID = 0o4000
-_S_ISVTX = 0o1000
-
-
 class ImageExtractionError(RuntimeError):
     """Raised when an image cannot be extracted without data loss."""
 
@@ -56,31 +50,11 @@ def is_valid_ext4_directory_entry(entry_name, entry_inode_idx):
     )
 
 
-# Per-class r/w/x bit masks: owner (0o400/0o200/0o100), group (0o040/0o020/0o010),
-# other (0o004/0o002/0o001).
-_CLASS_BITS = {0: 0o700, 1: 0o070, 2: 0o007}
-_CLASS_RWX = {
-    0: (0o400, 0o200, 0o100),
-    1: (0o040, 0o020, 0o010),
-    2: (0o004, 0o002, 0o001),
-}
-_SPECIAL_SLOT = {0: _S_ISUID, 1: _S_ISGID, 2: _S_ISVTX}
-
-
 def _mode_str(i_mode):
-    """Render an EXT4 i_mode value as a stat-style permission string (e.g. 'rwxr-xr-x')."""
-    out = []
-    for cls in range(3):
-        rbit, wbit, xbit = _CLASS_RWX[cls]
-        slot = _SPECIAL_SLOT[cls]
-        out.append('r' if i_mode & rbit else '-')
-        out.append('w' if i_mode & wbit else '-')
-        if i_mode & slot:
-            # setuid/setgid/sticky: 's'/'t' when the x bit is set, 'S'/'T' when it is not
-            out.append(('s' if cls < 2 else 't') if i_mode & xbit else ('S' if cls < 2 else 'T'))
-        else:
-            out.append('x' if i_mode & xbit else '-')
-    return ''.join(out)
+    """Render an EXT4 i_mode value as a 4-digit octal string, the canonical
+    Android fs_config mode form (e.g. '0755', '4755', '1777')."""
+    perm = i_mode & 0o7777
+    return f'{perm:04o}'
 
 
 # High-level EXT4 extraction and metadata generation facade.
@@ -311,7 +285,7 @@ class ULTRAMAN(object):
                 entry_components = (*components, entry_name)
                 target = output_path(entry_components)
                 mode = _mode_str(int(entry_inode.i_mode))
-                if len(mode) != 9:
+                if len(mode) != 4:
                     raise ImageExtractionError(f'EXT4 文件权限无效: {entry_name!r}')
                 uid = int(entry_inode.i_uid)
                 gid = int(entry_inode.i_gid)
