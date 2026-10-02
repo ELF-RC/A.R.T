@@ -276,6 +276,22 @@ def record_global_info(config_dir, partition, record):
     return info
 
 
+def prune_global_info(config_dir, layout):
+    """Drop info.json entries whose WORKSPACE/<partition>/ directory is missing."""
+    info = load_global_info(config_dir)
+    stale = [
+        p for p in info
+        if not layout.partition_dir(p).is_dir()
+    ]
+    if not stale:
+        return
+    for p in stale:
+        del info[p]
+    global_info_path(config_dir).write_text(
+        _json.dumps(info, indent=4), encoding='utf-8'
+    )
+
+
 def metadata_path(config_dir, partition, suffix):
     return Path(config_dir) / f'{partition}{suffix}'
 

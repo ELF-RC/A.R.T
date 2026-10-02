@@ -282,7 +282,12 @@ def menu_main():
             return
         if option in menu_actions:
             menu_actions[option]()
-        elif option == 1:
+        elif option in {1, 2, 3, 4, 5, 6, 9, 10, 11}:
+            # Stale info.json entries (missing WORKSPACE/<partition>/) are
+            # pruned before any extract/repack flow touches them.
+            from Scripts.Primary.WorkSpace import prune_global_info
+            prune_global_info(V.config, V.layout)
+        if option == 1:
             infile = V.input + 'payload.bin'
             if not os.path.exists(infile):
                 input("未发现Payload.Bin")
@@ -308,38 +313,53 @@ def menu_main():
             More.main()
             continue
         elif int(option) in [9, 10, 11]:
-            if int(option) == 9:
-                # _kernel markers now live in the global info.json
-                from Scripts.Primary.WorkSpace import load_global_info
-                for f_basename, rec in sorted(load_global_info(V.config).items()):
-                    if not (isinstance(rec, dict) and rec.get('type') == 'kernel'):
-                        continue
-                    source = workspace_partition(f_basename)
-                    if os.path.isdir(source):
-                        print(f'是否合成: {f_basename}.img [1/0]: ', end='')
-                        if input() != '1':
-                            continue
-                        boot_repack(source, V.out)
+            from Scripts.Primary.WorkSpace import load_global_info
+            info = load_global_info(V.config)
+            candidates = []  # (f_basename, source_dir, fsconfig, contexts, infojson)
+
             for file in glob(V.config + '*_file_contexts'):
                 f_basename = os.path.basename(file).rsplit('_', 1)[0]
                 source = workspace_partition(f_basename)
-                if os.path.isdir(source):
-                    fsconfig = V.config + f_basename + '_fs_config'
-                    contexts = V.config + f_basename + '_file_contexts'
-                    # Single global info.json records every partition;
-                    # repacker picks the current one by directory name.
-                    infojson = V.config + 'info.json'
-                    if not os.path.isfile(infojson):
-                        infojson = None
-                    if os.path.isfile(contexts) and os.path.isfile(fsconfig):
-                        txts = {9: "img", 10: "new.dat", 11: "new.dat.br"}
-                        print(f'是否合成: {f_basename}.{txts.get(int(option), ".new.dat.br")} [1/0]: ', end='')
-                        if input() != '1':
-                            continue
-                        if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "1":
-                            recompress_erofs(source, fsconfig, contexts, infojson, int(option))
-                        else:
-                            recompress_ext4(source, fsconfig, contexts, infojson, int(option))
+                fsconfig = V.config + f_basename + '_fs_config'
+                # 非 kernel 分区：需要 info.json 有该分区条目 + WORKSPACE 目录存在
+                if f_basename not in info:
+                    continue
+                if not os.path.isdir(source):
+                    continue
+                candidates.append((f_basename, source, fsconfig, file, V.config + 'info.json'))
+
+            if int(option) == 9:
+                # kernel 类：info.json 有条目 + WORKSPACE 目录存在
+                for f_basename, rec in sorted(info.items()):
+                    if not (isinstance(rec, dict) and rec.get('type') == 'kernel'):
+                        continue
+                    source = workspace_partition(f_basename)
+                    if not os.path.isdir(source):
+                        continue
+                    candidates.append((f_basename, source, None, None, None))
+
+            if not candidates:
+                print('> 当前工程内未找到可合成的分区镜像')
+                continue
+            for f_basename, source, fsconfig, contexts, infojson in candidates:
+                if int(option) == 9 and fsconfig is None:
+                    # kernel 分区 → boot repack
+                    print(f'是否合成: {f_basename}.img [1/0]: ', end='')
+                    if input() != '1':
+                        continue
+                    boot_repack(source, V.out)
+                    continue
+                # 非 kernel：需要 fsconfig + contexts 文件都存在
+                if not (os.path.isfile(contexts) and os.path.isfile(fsconfig)):
+                    continue
+                txts = {9: "img", 10: "new.dat", 11: "new.dat.br"}
+                print(f'是否合成: {f_basename}.{txts.get(int(option), ".new.dat.br")} [1/0]: ', end='')
+                if input() != '1':
+                    continue
+                if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "1":
+                    recompress_erofs(source, fsconfig, contexts, infojson, int(option))
+                else:
+                    recompress_ext4(source, fsconfig, contexts, infojson, int(option))
         else:
             input(f'\x1b[0;33m{option}\x1b[0m enter error !')
             continue
