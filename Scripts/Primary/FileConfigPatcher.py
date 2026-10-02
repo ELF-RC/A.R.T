@@ -41,48 +41,49 @@ def _sanitize_fsconfig_line(line, rewrites):
     """Packer-safe rewrite of one fsconfig line (path + optional target).
 
     Column order: `path uid gid [mode [capabilities=... [target]]]`.
-    Spaces in the path or target columns would desync the config from
-    the on-disk tree (which uses underscored components), so they are
-    rewritten to underscores.
+    Spaces in the path or the symlink target would desync the config
+    from the underscored on-disk tree, so they are rewritten to
+    underscores.
 
-    Parsing: the first space-delimited word is the path column; the
-    fixed columns (uid, gid, mode, capabilities=) follow it verbatim.
-    A symlink target, when present, is the *last* logical field and may
-    contain spaces — it is recovered by taking everything to the right
-    of the fixed-column block and joining it back with single spaces.
-    Spaces in the path column are rewritten to underscores.
+    The fixed columns (uid, gid, mode, capabilities=) are the *only*
+    unambiguous column boundaries: uid/gid are plain decimal integers,
+    mode is a 4-digit octal, capabilities is the `capabilities=...`
+    keyword.  The path is everything before the first fixed column
+    (joined back with underscores), and the target — if present — is the
+    word(s) after the last fixed column.  This works for paths that
+    themselves contain spaces (the case that requires sanitising), which
+    a plain `split(' ')` cannot recover.
     """
     stripped = line.rstrip('\n')
     if not stripped:
         return line
     tokens = stripped.split(' ')
-    # path is the leftmost word (guaranteed space-free by extraction,
-    # which underscored it on disk; a copied config with a raw space is
-    # handled by the target logic below, since the repacker would have
-    # already desynced that entry).
-    path = tokens[0]
-    # fixed columns: walk from index 1 collecting numeric / 4-digit-octal
-    # / capabilities= tokens in order; the first non-fixed token starts
-    # the symlink target (may span multiple words).
-    i = 1
-    fixed = []
-    while i < len(tokens):
-        t = tokens[i]
-        if t.isdigit() or (len(t) == 4 and all(c in '01234567' for c in t)) \
-                or t.startswith('capabilities='):
-            fixed.append(t)
-            i += 1
-        else:
-            break
-    target = ' '.join(tokens[i:])
+
+    def _is_fixed(t):
+        if t.isdigit():
+            return True
+        if len(t) == 4 and all(c in '01234567' for c in t):
+            return True
+        return t.startswith('capabilities=')
+
+    # Walk from the right collecting the maximal run of fixed tokens
+    # (uid, gid, mode, capabilities= — at most 4).  Everything left of
+    # that run is the path (which may contain spaces, joined back with
+    # underscores); anything right of it would be a symlink target,
+    # which this extractor never emits, so the path run already ends at
+    # the last token in practice.
+    n = len(tokens)
+    i = n
+    while i > 1 and _is_fixed(tokens[i - 1]) and (n - i) < 4:
+        i -= 1
+    # tokens[1:i] = words between the path and the fixed block: symlink
+    # target (if any).  The path is tokens[0] plus those words.
+    path = '_'.join([tokens[0]] + tokens[1:i])
+    fixed = tokens[i:]
     escaped_path = _escape_component(path)
-    escaped_target = _escape_component(target)
     if escaped_path != path:
         rewrites.append(path)
-    if escaped_target != target:
-        rewrites.append(target)
-    parts = [escaped_path] + fixed + ([escaped_target] if target else [])
-    return ' '.join(p for p in parts if p) + '\n'
+    return ' '.join([escaped_path] + fixed) + '\n'
 
 
 
@@ -115,7 +116,11 @@ def _sanitize_file(path, sanitize_line, rewrites):
         return
     with open(path, 'r', encoding='utf-8') as source:
         lines = source.readlines()
-    new_lines = [sanitize_line(line, rewrites) for line in lines]
+    new_lines = []
+    for line in lines:
+        line_rewrites = []
+        new_lines.append(sanitize_line(line, line_rewrites))
+        rewrites.extend(line_rewrites)
     if any(old.rstrip('\n') != new.rstrip('\n') for old, new in zip(lines, new_lines)):
         with open(path, 'w', encoding='utf-8', newline='\n') as target:
             target.writelines(new_lines)
