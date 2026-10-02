@@ -243,11 +243,37 @@ def partition_metadata_names(partition):
     return (
         f'{partition}_file_contexts',
         f'{partition}_fs_config',
-        f'{partition}_info.json',
         f'{partition}_special',
-        f'{partition}_size.txt',
-        f'{partition}_kernel.txt',
     )
+
+
+# Global info.json: one config/info.json records per-partition metadata
+# (ext4 sizing, erofs raw size, boot/_kernel markers). Kept in a single
+# file so a run never scatters one tiny blob per partition.
+def global_info_path(config_dir):
+    return Path(config_dir) / 'info.json'
+
+
+def load_global_info(config_dir):
+    """Read config/info.json; {} when absent or malformed."""
+    path = global_info_path(config_dir)
+    if not path.is_file():
+        return {}
+    try:
+        data = _json.loads(path.read_text(encoding='utf-8'))
+    except (_json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def record_global_info(config_dir, partition, record):
+    """Merge one partition's record into config/info.json (create-on-write)."""
+    info = load_global_info(config_dir)
+    info[partition] = record
+    path = global_info_path(config_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(info, indent=4), encoding='utf-8')
+    return info
 
 
 def metadata_path(config_dir, partition, suffix):
@@ -288,7 +314,7 @@ def _commit_extracted_partition(partition, stage_root, required_metadata, preser
     config_dir = Path(V.config)
     required = set(required_metadata)
     available = set()
-    for name in partition_metadata_names(partition):
+    for name in partition_metadata_names(partition) + ('info.json',):
         candidate = config_dir / name
         if candidate.exists() and candidate.is_file():
             available.add(name)
@@ -304,6 +330,12 @@ def load_image_json(dumpinfo, source_dir):
     with open(dumpinfo, "a+", encoding="utf-8") as f:
         f.seek(0)
         info = _json.load(f)
+    # info.json is a single global file: {partition: {a,b,c,d,e,s}}.
+    # Pick the current partition's record by its directory name; fall back
+    # to the whole dict when the layout is flat (legacy single-partition).
+    partition = os.path.basename(os.path.normpath(str(source_dir)))
+    if partition in info and isinstance(info[partition], dict):
+        info = info[partition]
     inodes = info["a"]
     block_size = info["b"]
     per_group = info["c"]

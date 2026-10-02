@@ -309,8 +309,11 @@ def menu_main():
             continue
         elif int(option) in [9, 10, 11]:
             if int(option) == 9:
-                for file in glob(V.config + '*_kernel.txt'):
-                    f_basename = os.path.basename(file).rsplit('_', 1)[0]
+                # _kernel markers now live in the global info.json
+                from Scripts.Primary.WorkSpace import load_global_info
+                for f_basename, rec in sorted(load_global_info(V.config).items()):
+                    if not (isinstance(rec, dict) and rec.get('type') == 'kernel'):
+                        continue
                     source = workspace_partition(f_basename)
                     if os.path.isdir(source):
                         print(f'是否合成: {f_basename}.img [1/0]: ', end='')
@@ -323,7 +326,9 @@ def menu_main():
                 if os.path.isdir(source):
                     fsconfig = V.config + f_basename + '_fs_config'
                     contexts = V.config + f_basename + '_file_contexts'
-                    infojson = V.config + f_basename + '_info.json'
+                    # Single global info.json records every partition;
+                    # repacker picks the current one by directory name.
+                    infojson = V.config + 'info.json'
                     if not os.path.isfile(infojson):
                         infojson = None
                     if os.path.isfile(contexts) and os.path.isfile(fsconfig):

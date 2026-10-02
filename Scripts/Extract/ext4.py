@@ -6,15 +6,14 @@ sparse/raw detection, fsconfig/file_contexts collection and image
 extraction.
 """
 
-import json
 import mmap
 import os
 import re
 import shutil
 import struct
-import sys
 from pathlib import Path
 
+from Scripts.Primary.WorkSpace import record_global_info
 from Scripts.Primary.eeems import (
     Inode,
     Volume,
@@ -218,8 +217,8 @@ class ULTRAMAN(object):
 
         contexts_path = config_dir / f'{self.FileName}_file_contexts'
         fsconfig_path = config_dir / f'{self.FileName}_fs_config'
-        info_path = config_dir / f'{self.FileName}_info.json'
         space_path = config_dir / f'{self.FileName}_special'
+        info_path = config_dir / 'info.json'
         partition_size = os.path.getsize(self.OUTPUT_IMAGE_FILE)
         with open(self.OUTPUT_IMAGE_FILE, 'rb') as filesystem:
             filesystem.seek(1024)
@@ -368,8 +367,7 @@ class ULTRAMAN(object):
         self.fsconfig.insert(2 if partition_name == 'system' else 1, f'{partition_name} 0 0 0755')
         self.__appendf('\n'.join(self.fsconfig), fsconfig_path)
         self.__appendf('\n'.join(self.space), space_path)
-        with open(info_path, 'w', encoding='utf-8') as stream:
-            json.dump(manifest, stream, indent=4)
+        record_global_info(config_dir, partition_name, manifest)
         if self.contexts:
             self.contexts.sort()
             root_context = None
@@ -433,7 +431,7 @@ def _verify_metadata(partition, config_dir):
     required = (
         _metadata_path(config_dir, partition, "_file_contexts"),
         _metadata_path(config_dir, partition, "_fs_config"),
-        _metadata_path(config_dir, partition, "_info.json"),
+        config_dir / "info.json",
     )
     missing = [str(path) for path in required if not path.is_file()]
     if missing:

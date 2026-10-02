@@ -52,16 +52,16 @@ def decompress_img(source, distance=None, keep=1):
 
     if file_type in ('boot', 'vendor_boot'):
         from Scripts.Extract.boot import boot_unpack
-        from Scripts.Primary.WorkSpace import create_partition_stage, metadata_path, _commit_extracted_partition
+        from Scripts.Primary.WorkSpace import create_partition_stage, _commit_extracted_partition, record_global_info
         try:
             _, staged_partition, staged_config = create_partition_stage(partition, 'boot-extract')
             if not boot_unpack(working_source, str(staged_partition)):
                 raise LayoutError(f'{partition} boot 解包失败')
             if not os.path.isfile(os.path.join(staged_partition, 'boot_o.img')):
                 raise LayoutError(f'{partition} boot 解包未生成 boot_o.img')
-            metadata_path(staged_config, partition, '_kernel.txt').touch()
+            record_global_info(staged_config, partition, {'type': 'kernel'})
             committed = _commit_extracted_partition(
-                partition, staged_partition, {f'{partition}_kernel.txt'})
+                partition, staged_partition, {'info.json'})
         except (LayoutError, OSError) as error:
             print(f'> {partition} boot 分解失败: {error}')
 

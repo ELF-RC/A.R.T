@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from Scripts.Primary.Utils import V, call
+from Scripts.Primary.WorkSpace import record_global_info
 
 
 # Validate partition paths and normalize extractor metadata.
@@ -81,8 +82,11 @@ def extract_erofs(working_source, partition, destination):
         if source.is_symlink() or not source.is_file():
             raise LayoutError(f'EROFS 输入镜像无效: {source}')
         config_dir.mkdir(parents=True, exist_ok=True)
-        _metadata_path(config_dir, partition, '_size.txt').write_text(
-            str(source.stat().st_size), encoding='utf-8'
+        # Raw image size goes into the global info.json (keyed by partition),
+        # not a per-partition _size.txt blob.
+        record_global_info(
+            config_dir, partition,
+            {'size': source.stat().st_size, 'type': 'erofs'},
         )
         if call(['extract.erofs', '-i', str(source), '-o', str(workspace), '-x']) != 0:
             print('> EROFS 分解失败')
@@ -95,7 +99,7 @@ def extract_erofs(working_source, partition, destination):
             {
                 f'{partition}_file_contexts',
                 f'{partition}_fs_config',
-                f'{partition}_size.txt',
+                'info.json',
             },
         )
     except (LayoutError, OSError) as error:
