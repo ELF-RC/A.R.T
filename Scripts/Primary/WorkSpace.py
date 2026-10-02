@@ -346,28 +346,31 @@ def load_image_json(dumpinfo, source_dir):
     with open(dumpinfo, "a+", encoding="utf-8") as f:
         f.seek(0)
         info = _json.load(f)
-    # info.json is a single global file: {partition: {a,b,c,d,e,s}}.
-    # Pick the current partition's record by its directory name; fall back
-    # to the whole dict when the layout is flat (legacy single-partition).
+    # info.json is a single global file keyed by partition name. A record's
+    # schema depends on its source: ext4 carries superblock fields
+    # {a,b,c,d,e,s}; erofs carries {size,type}; boot carries {type:'kernel'}.
+    # Only the raw image size is consumed downstream (for the ro/rw decision
+    # and the dsize floor), so missing superblock fields default safely
+    # instead of raising KeyError on a non-ext4 record.
     partition = os.path.basename(os.path.normpath(str(source_dir)))
     if partition in info and isinstance(info[partition], dict):
         info = info[partition]
-    inodes = info["a"]
-    block_size = info["b"]
-    per_group = info["c"]
-    mount_point = info["d"]
+    fsize = info.get('s', info.get('size', 0))
+    inodes = info.get('a', 0)
+    block_size = info.get('b', 4096)
+    per_group = info.get('c', 0)
+    mount_point = info.get('d', partition)
     if mount_point != "/":
         mount_point = "/" + mount_point
-    fsize = info["s"]
-    blocks = ceil(int(fsize) / int(block_size))
+    blocks = ceil(int(fsize) / int(block_size)) if block_size else 0
     dsize = get_dir_size(source_dir)
-    if dsize > int(fsize):
+    if int(fsize) and dsize > int(fsize):
         minsize = dsize - int(fsize)
         if int(minsize) < 20971520:
             isize = int(dsize * 1.08)
             dsize = str(isize)
     else:
-        dsize = fsize
+        dsize = fsize or dsize
     return fsize, dsize, inodes, block_size, blocks, per_group, mount_point
 
 
