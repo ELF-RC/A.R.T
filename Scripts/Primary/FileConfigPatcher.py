@@ -3,6 +3,99 @@
 import os
 from collections import deque
 
+
+# ---------------------------------------------------------------------------
+# fsconfig / file_contexts sanitization
+# ---------------------------------------------------------------------------
+# The Android packers (e2fsdroid, mkfs.erofs) only accept ASCII in their
+# config files, and their line parsers are whitespace-sensitive:
+#   - fsconfig:  "path uid gid [mode [capabilities=... [link_target]]]"
+#   - contexts:  "path-regex u:object_r:label:s0"
+# Non-ASCII path bytes break both parsers outright, and a space inside the
+# path column misaligns the uid/gid columns. sanitize_metadata_files()
+# rewrites such path fields to ASCII \uXXXX form, and records every
+# rewrite in a companion .map file so a later repack step can restore the
+# original names.
+def _escape_component(component):
+    """ASCII-safe form of one fsconfig / contexts path component.
+
+    Every byte >= 0x80 becomes \\uXXXX; ASCII characters are kept as-is
+    (SELinux special characters in contexts are already escaped by the
+    extractor, so they need no second pass here).
+    """
+    out = []
+    for char in component:
+        code = ord(char)
+        if code < 0x80:
+            out.append(char)
+        else:
+            out.append('\\u%04x' % code)
+    return ''.join(out)
+
+
+def _sanitize_one_line(line, rewrites):
+    """Return the sanitized line; record the original path field when changed."""
+    stripped = line.rstrip('\n')
+    if not stripped:
+        return line
+    fields = stripped.split(' ')
+    if len(fields) < 2:
+        # fsconfig: "path uid ..." | contexts: "path label"
+        # path is the first field in both layouts.
+        pass
+    original_path = fields[0]
+    escaped = _escape_component(original_path)
+    if escaped != original_path:
+        rewrites.append(original_path)
+    if len(fields) == 1:
+        return escaped + '\n'
+    rest = fields[1:]
+    return escaped + ' ' + ' '.join(rest) + '\n'
+
+
+def sanitize_metadata_files(fsconfig_path, contexts_path):
+    """ASCII-sanitize the path column of fsconfig / file_contexts in place.
+
+    fsconfig lines look like "path uid gid mode [cap] [link]" and contexts
+    lines look like "path-regex label"; in both the first column is the path
+    and every other column is preserved verbatim. Returns the list of
+    original path fields that were rewritten (empty when already safe).
+    """
+    rewrites = []
+    for path in (fsconfig_path, contexts_path):
+        if not os.path.isfile(path):
+            continue
+        with open(path, 'r', encoding='utf-8') as source:
+            lines = source.readlines()
+        new_lines = [_sanitize_one_line(line, rewrites) for line in lines]
+        if any(old.rstrip('\n') != new.rstrip('\n') for old, new in zip(lines, new_lines)):
+            with open(path, 'w', encoding='utf-8', newline='\n') as target:
+                target.writelines(new_lines)
+    # Deduplicate while preserving order.
+    seen = set()
+    unique = []
+    for item in rewrites:
+        if item not in seen:
+            seen.add(item)
+            unique.append(item)
+    return unique
+
+
+def write_map_file(map_path, rewrites):
+    """Record the rewritten paths so repack can restore original names."""
+    with open(map_path, 'w', encoding='utf-8', newline='\n') as target:
+        for item in rewrites:
+            target.write(item + '\n')
+
+
+def load_map_file(map_path):
+    """Read back the rewrite map; empty list when the file is absent."""
+    if not os.path.isfile(map_path):
+        return []
+    with open(map_path, 'r', encoding='utf-8') as source:
+        return [line.rstrip('\n') for line in source if line.strip()]
+
+
 # ---------------------------------------------------------------------------
 # fsconfig scanning and metadata completion for image repacking
 # ---------------------------------------------------------------------------

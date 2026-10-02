@@ -11,7 +11,7 @@ from Scripts.Primary.Utils import (
     call,
     get_dir_size,
 )
-from Scripts.Primary.FileConfigPatcher import patch_fsconfig
+from Scripts.Primary.FileConfigPatcher import patch_fsconfig, sanitize_metadata_files, write_map_file
 from Scripts.Primary.WorkSpace import load_image_json
 from Scripts.ReMake.dat_br import recompress_dat_br
 
@@ -38,6 +38,11 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
     patch_fsconfig(source, fsconfig)
     walk_contexts(fsconfig)
     walk_contexts(contexts)
+    # The Android packers (mkfs.erofs) only accept ASCII in fsconfig /
+    # file_contexts; rewrite non-ASCII path columns and log the mapping.
+    rewrites = sanitize_metadata_files(fsconfig, contexts)
+    if rewrites:
+        write_map_file(os.path.join(V.out, f'{label}_space.txt'), rewrites)
 
     timestamp = (
         int(time.time())
