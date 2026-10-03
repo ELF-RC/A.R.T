@@ -56,11 +56,14 @@ def _mode_str(i_mode):
 
 
 def _on_disk_component(name):
-    """The component name actually written to disk. Spaces become
-    underscores (the repacker cannot address paths containing a space in
-    fs_config); other characters are kept as-is. A mapping of every
-    rewritten path is recorded in space.txt so repack can restore it."""
-    return name.replace(' ', '_')
+    r"""The component name as written to disk. All characters are kept as-is
+    (the repacker's fs_config / contexts handle non-ASCII via \xNN escaping);
+    only spaces are unsupported by Android's config format. A space in a
+    name is warned about once rather than renamed, since renaming desyncs
+    the config from the on-disk tree."""
+    if ' ' in name:
+        print(f'\x1b[1;33m[Warning] 路径含空格，Android fs_config 不支持: {name}\x1b[0m')
+    return name
 
 
 # High-level EXT4 extraction and metadata generation facade.
@@ -73,7 +76,6 @@ class ULTRAMAN(object):
         self.EXTRACT_DIR = ''
         self.contexts = []
         self.fsconfig = []
-        self.space = []
         self.sign_offset = 0
 
     def __file_name(self, file_path):
@@ -217,7 +219,6 @@ class ULTRAMAN(object):
 
         contexts_path = config_dir / f'{self.FileName}_file_contexts'
         fsconfig_path = config_dir / f'{self.FileName}_fs_config'
-        space_path = config_dir / f'{self.FileName}_special'
         info_path = config_dir / 'info.json'
         partition_size = os.path.getsize(self.OUTPUT_IMAGE_FILE)
         with open(self.OUTPUT_IMAGE_FILE, 'rb') as filesystem:
@@ -241,16 +242,16 @@ class ULTRAMAN(object):
         seen_targets = set()
 
         def output_path(components):
-            # components are the *original* on-disk names; only reject path
-            # separators / traversal, not spaces or unicode (spaces are
-            # rewritten to underscores on disk, unicode kept as-is).
+            # All on-disk names are kept verbatim (non-ASCII is handled by the
+            # repacker's \xNN contexts escaping); only path separators and
+            # traversal are rejected. Spaces are unsupported by Android's
+            # fs_config format and are warned about, not renamed.
             if not components or any(
                 not component or component in {'.', '..'} or '/' in component or '\\' in component
                 for component in components
             ):
                 raise ImageExtractionError(f'EXT4 包含无法安全表示的路径: {components!r}')
-            on_disk = tuple(_on_disk_component(component) for component in components)
-            target = output_root.joinpath(*on_disk)
+            target = output_root.joinpath(*components)
             try:
                 target.relative_to(output_root)
             except ValueError as error:
@@ -298,19 +299,11 @@ class ULTRAMAN(object):
                     raise ImageExtractionError(f'EXT4 文件权限无效: {entry_name!r}')
                 uid = int(entry_inode.i_uid)
                 gid = int(entry_inode.i_gid)
-                # fs_config paths must match the on-disk tree exactly, because the
-                # repacker (e2fsdroid / mkfs.erofs) matches them by literal path:
-                # spaces are already underscored on disk, non-ASCII names are
-                # kept as-is. Rewriting either here would desync the config from
-                # the tree and drop files on repack.
-                fs_path = f'{self.FileName}/' + '/'.join(
-                    _on_disk_component(c) for c in entry_components
-                )
-                # space.txt records every path whose name was rewritten on disk
-                # (space -> underscore), so repack can restore the original
-                # names.
-                if _on_disk_component(entry_name) != entry_name:
-                    self.space.append('/'.join(entry_components))
+                # fs_config paths must match the on-disk tree exactly: all
+                # names are kept verbatim (non-ASCII is escaped to \xNN only
+                # at repack time). A space in a name is warned about, not
+                # rewritten, since renaming would desync the config.
+                fs_path = f'{self.FileName}/' + '/'.join(entry_components)
                 cap = ''
                 link_target = ''
                 for attribute, value in entry_inode.xattrs:
@@ -366,7 +359,6 @@ class ULTRAMAN(object):
         self.fsconfig.insert(1, f'{partition_name} 0 2000 0755' if partition_name == 'vendor' else '/lost+found 0 0 0700')
         self.fsconfig.insert(2 if partition_name == 'system' else 1, f'{partition_name} 0 0 0755')
         self.__appendf('\n'.join(self.fsconfig), fsconfig_path)
-        self.__appendf('\n'.join(self.space), space_path)
         record_global_info(config_dir, partition_name, manifest)
         if self.contexts:
             self.contexts.sort()

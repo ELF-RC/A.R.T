@@ -243,7 +243,6 @@ def partition_metadata_names(partition):
     return (
         f'{partition}_file_contexts',
         f'{partition}_fs_config',
-        f'{partition}_special',
     )
 
 
