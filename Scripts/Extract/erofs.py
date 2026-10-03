@@ -41,13 +41,21 @@ def _metadata_path(config_dir: Path, partition: str, suffix: str) -> Path:
 def _normalize_erofs_metadata(partition: str, config_dir: Path) -> bool:
     """Validate EROFS metadata files are present and regular.
 
-    extract.erofs -x already emits <partition>_file_contexts and
-    <partition>_fs_config into the config directory, so no rename is
-    needed — this checks their presence and that they are not symlinks.
+    extract.erofs -x emits <partition>_file_contexts, <partition>_fs_config,
+    and a <partition>_fs_options file; A.R.T doesn't consume the last one, so
+    it is removed here. The two needed files are checked for presence and that
+    they are not symlinks.
     """
     config_dir = config_dir.resolve()
     if config_dir.is_symlink() or not config_dir.is_dir():
         raise LayoutError(f'{partition} 的 EROFS metadata 目录无效: {config_dir}')
+    # extract.erofs also emits <partition>_fs_options; drop it (unused).
+    fsoptions = _metadata_path(config_dir, partition, '_fs_options')
+    if fsoptions.exists() and fsoptions.is_file():
+        try:
+            fsoptions.unlink()
+        except OSError:
+            pass
     contexts = _metadata_path(config_dir, partition, '_file_contexts')
     fsconfig = _metadata_path(config_dir, partition, '_fs_config')
     if contexts.is_symlink() or fsconfig.is_symlink():
@@ -87,7 +95,7 @@ def extract_erofs(working_source, partition, destination):
         # not a per-partition _size.txt blob.
         record_global_info(
             config_dir, partition,
-            {'size': source.stat().st_size, 'type': 'erofs'},
+            {'size': source.stat().st_size, 'type': 'erofs', 'label': partition},
         )
         result = call(
             ['extract.erofs', '-i', str(source), '-o', str(workspace), '-x'],

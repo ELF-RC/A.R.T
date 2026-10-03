@@ -29,7 +29,10 @@ def walk_contexts(path):
 
 # Prepare sizes, timestamps, metadata, and output paths.
 def _prepare(source, fsconfig, contexts, dumpinfo):
-    label = os.path.basename(source)
+    # Authoritative label comes from info.json; fall back to the directory
+    # basename when no record exists.
+    info_label, _info_size = load_image_json(dumpinfo, source) if dumpinfo else ('', 0)
+    label = info_label or os.path.basename(source)
     os.makedirs(V.out, exist_ok=True)
     distance = os.path.join(V.out, f"{label}.img")
     if os.path.isfile(distance):
@@ -51,15 +54,11 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         if V.SETUP_MANIFEST["UTC"].lower() == "live"
         else V.SETUP_MANIFEST["UTC"]
     )
-    if dumpinfo:
-        _fsize, dsize, _inodes, _block_size, _blocks, _per_group, _mount_point = (
-            load_image_json(dumpinfo, source)
-        )
-        size = dsize
-    else:
-        size = get_dir_size(source, 1.3)
-        if int(size) <= 1048576:
-            size = 1048576
+    # mkfs.erofs derives the output size from the content + compression; the
+    # info.json size is the original compressed footprint and isn't a target.
+    size = get_dir_size(source, 1.3)
+    if int(size) <= 1048576:
+        size = 1048576
 
     new_distance = os.path.join(V.out, f"{label}_new.img")
     if os.path.isfile(new_distance):

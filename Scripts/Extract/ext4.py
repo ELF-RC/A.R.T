@@ -231,12 +231,9 @@ class ULTRAMAN(object):
         per_group = struct.unpack_from('<L', superblock, 32)[0]
         label = bytes(superblock[120:136]).rstrip(b'\x00').decode('utf-8', 'replace')
         manifest = {
-            'a': inode_count,
-            'b': block_size,
-            'c': per_group,
-            'd': label,
-            'e': 'ext4',
-            's': partition_size,
+            'label': label,
+            'type': 'ext4',
+            'size': partition_size,
         }
 
         seen_targets = set()

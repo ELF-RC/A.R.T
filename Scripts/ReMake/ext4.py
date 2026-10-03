@@ -96,7 +96,10 @@ def _ext4_image_size(source, block_size=4096):
 
 # Prepare sizes, timestamps, metadata, and output paths.
 def _prepare(source, fsconfig, contexts, dumpinfo):
-    label = os.path.basename(source)
+    # Authoritative label + original size come from info.json; fall back to
+    # the directory basename when no record exists (e.g. hand-built tree).
+    info_label, info_size = load_image_json(dumpinfo, source) if dumpinfo else ('', 0)
+    label = info_label or os.path.basename(source)
     os.makedirs(V.out, exist_ok=True)
     distance = os.path.join(V.out, f"{label}.img")
     if os.path.isfile(distance):
@@ -129,16 +132,12 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         if V.SETUP_MANIFEST["UTC"].lower() == "live"
         else V.SETUP_MANIFEST["UTC"]
     )
-    # fsize is the original image size (ext4 's' or erofs 'size'). It is used
-    # when IMAGE_SIZE=1 to repack at the original footprint; IMAGE_SIZE=0
-    # sizes from the live source tree so it always fits data + ext4 metadata.
-    fsize = None
-    if dumpinfo:
-        fsize, _dsize, _inodes, _old_block_size, _old_blocks, _per_group, _mount_point = (
-            load_image_json(dumpinfo, source)
-        )
-    if V.SETUP_MANIFEST["IMAGE_SIZE"] == "1" and fsize:
-        size = max(int(fsize), 1048576)
+    # IMAGE_SIZE=1: repack at the original footprint from info.json. If it
+    # doesn't fit the content, mke2fs/e2fsdroid surfaces the error to the
+    # user — no silent floor or padding here.
+    # IMAGE_SIZE=0: size from the live source tree + ext4 metadata.
+    if V.SETUP_MANIFEST["IMAGE_SIZE"] == "1" and info_size:
+        size = info_size
     else:
         size = _ext4_image_size(source)
 
