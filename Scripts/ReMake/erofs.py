@@ -11,7 +11,7 @@ from Scripts.Primary.Utils import (
     call,
     get_dir_size,
 )
-from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, sanitize_metadata_files, write_map_file
+from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts
 from Scripts.Primary.WorkSpace import load_image_json
 from Scripts.ReMake.dat_br import recompress_dat_br
 
@@ -41,12 +41,9 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         patch_file_contexts(source, contexts)
     walk_contexts(fsconfig)
     walk_contexts(contexts)
-    # mkfs.erofs matches fs_config paths against the source tree literally,
-    # so space-bearing entries are aligned to the underscored on-disk form
-    # (and symlink targets with them); non-ASCII names are left as-is.
-    rewrites = sanitize_metadata_files(fsconfig, contexts)
-    if rewrites:
-        write_map_file(os.path.join(V.out, f'{label}_special'), rewrites)
+    # mkfs.erofs accepts raw non-ASCII in file_contexts, so it uses the
+    # human-readable on-disk file directly (no \xNN escaping needed).
+    # Space-bearing components are already underscored on disk.
 
     timestamp = (
         int(time.time())

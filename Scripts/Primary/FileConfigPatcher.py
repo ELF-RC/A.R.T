@@ -138,11 +138,10 @@ def _sanitize_fsconfig_line(line, rewrites):
 def _sanitize_contexts_line(line, rewrites):
     """Packer-safe rewrite of one file_contexts line (path-regex + label).
 
-    Layout: "path-regex u:object_r:label:s0" — exactly one space separates
-    the two fields. The regex may contain escaped specials but no raw
-    spaces (a space inside it would be misread as the field separator), so
-    spaces become underscores — matching the underscored on-disk tree. A
-    single rsplit is safe either way.
+    The on-disk file stays human-readable: only spaces become underscores
+    (to match the on-disk tree and the field separator); non-ASCII names
+    are kept verbatim. The \\xNN byte-escaping libselinux wants is applied
+    separately to a copy by translate_contexts_to_ascii for ext4 packing.
     """
     stripped = line.rstrip('\n')
     if not stripped:
@@ -152,11 +151,7 @@ def _sanitize_contexts_line(line, rewrites):
         path, label = parts[0], ''
     else:
         path, label = parts
-    # Spaces -> underscores to match the on-disk tree; non-ASCII bytes ->
-    # \xNN, which libselinux requires in contexts regexes. The path is
-    # already a regex from extraction (it carries \. etc.), so it is NOT
-    # re-escaped here.
-    escaped_path = _escape_non_ascii_bytes(_escape_component(path))
+    escaped_path = _escape_component(path)
     new_line = (escaped_path + ' ' + label + '\n') if label else escaped_path + '\n'
     if new_line.rstrip('\n') != stripped:
         rewrites.append(path)
@@ -196,19 +191,35 @@ def sanitize_metadata_files(fsconfig_path, contexts_path):
     return unique
 
 
-def write_map_file(map_path, rewrites):
-    """Record the rewritten paths so repack can restore original names."""
-    with open(map_path, 'w', encoding='utf-8', newline='\n') as target:
-        for item in rewrites:
-            target.write(item + '\n')
+def translate_contexts_to_ascii(src_contexts, dst_contexts):
+    """Copy a file_contexts file with non-ASCII bytes escaped as \\xNN.
 
-
-def load_map_file(map_path):
-    """Read back the rewrite map; empty list when the file is absent."""
-    if not os.path.isfile(map_path):
-        return []
-    with open(map_path, 'r', encoding='utf-8') as source:
-        return [line.rstrip('\n') for line in source if line.strip()]
+    The on-disk contexts stays human-readable (raw UTF-8, e.g.
+    /mi_ext/新建文件夹); e2fsdroid's libselinux rejects raw non-ASCII with
+    "Non-ASCII characters found", so ext4 packing feeds it this escaped
+    copy instead. mkfs.erofs accepts raw non-ASCII and uses the original
+    directly. Each path-regex line is escaped in place; blank / malformed
+    lines pass through unchanged. Always overwrites dst_contexts.
+    """
+    if not os.path.isfile(src_contexts):
+        return False
+    with open(src_contexts, 'r', encoding='utf-8') as src:
+        lines = src.readlines()
+    out = []
+    for line in lines:
+        stripped = line.rstrip('\n')
+        if not stripped:
+            out.append(line)
+            continue
+        parts = stripped.rsplit(' ', 1)
+        if len(parts) == 2:
+            path, label = parts
+            out.append(_escape_non_ascii_bytes(path) + ' ' + label + '\n')
+        else:
+            out.append(_escape_non_ascii_bytes(stripped) + '\n')
+    with open(dst_contexts, 'w', encoding='utf-8', newline='\n') as dst:
+        dst.writelines(out)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -352,17 +363,19 @@ def patch_fsconfig(dir_path: str, fs_config: str):
 
 # Public file_contexts patching entry point used by EXT4/EROFS repacking.
 def patch_file_contexts(dir_path: str, contexts: str):
-    """Add file_contexts label rules for on-disk paths missing one, and
-    re-escape non-ASCII bytes libselinux rejects.
+    """Add file_contexts label rules for on-disk paths missing one.
+
+    The on-disk file stays human-readable: paths keep raw UTF-8 (e.g.
+    /mi_ext/新建文件夹) with only ASCII regex specials escaped and spaces
+    turned to underscores. The \\xNN byte-escaping libselinux wants for
+    ext4 packing is applied to a throwaway copy by translate_contexts_to_ascii;
+    mkfs.erofs accepts raw non-ASCII and uses this file directly.
 
     Mirrors patch_fsconfig: e2fsdroid resolves an SELinux label for every
     on-disk path via ``-S contexts``; a path with no matching rule aborts
     with "No such file or directory searching for label". This walks the
     source tree and back-fills missing paths with the nearest ancestor's
-    label (defaulting to system_file). The whole file is rewritten so both
-    pre-existing and newly added non-ASCII paths come out as \\xNN byte
-    escapes (libselinux rejects raw non-ASCII with "Non-ASCII characters
-    found"), and spaces become underscores to match the on-disk tree.
+    label (defaulting to system_file).
     """
     if not os.path.isfile(contexts):
         return
@@ -400,7 +413,9 @@ def patch_file_contexts(dir_path: str, contexts: str):
         prefix = mount if rel == '.' else mount + '/' + rel.replace(os.sep, '/')
         for name in dirs + files:
             full = prefix + '/' + name
-            esc = _escape_context_path(full)
+            # Disk form: spaces -> underscores, ASCII regex specials escaped,
+            # non-ASCII kept verbatim (human-readable).
+            esc = _escape_non_ascii_bytes(re.escape(full.replace(' ', '_')))
             if esc in existing:
                 continue
             lbl = ancestor_label(full) or DEFAULT_LABEL
@@ -408,15 +423,8 @@ def patch_file_contexts(dir_path: str, contexts: str):
             literal_labels[full] = lbl
             added += 1
 
-    # Rewrite the whole file so pre-existing non-ASCII paths are also
-    # byte-escaped (sorted for stable output, matching patch_fsconfig).
-    # Each stored path is round-tripped literal -> regex so an entry that
-    # was already a regex (\.) or raw non-ASCII both come out correctly
-    # escaped.
-    with open(contexts, 'w', encoding='utf-8', newline='\n') as f:
-        for esc in sorted(existing.keys()):
-            literal = _unescape_context_path(esc)
-            re_escaped = _escape_context_path(literal)
-            f.write(f'{re_escaped} {existing[esc]}\n')
     if added:
+        with open(contexts, 'w', encoding='utf-8', newline='\n') as f:
+            for esc in sorted(existing.keys()):
+                f.write(f'{esc} {existing[esc]}\n')
         print(f'{GREEN}ContextsPatcher: Added {added} entries{CLOSE}')

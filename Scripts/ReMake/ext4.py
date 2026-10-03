@@ -13,7 +13,7 @@ from Scripts.Primary.Utils import (
     ceil,
     get_dir_size,
 )
-from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts
+from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, translate_contexts_to_ascii
 from Scripts.Primary.WorkSpace import load_image_json
 from Scripts.ReMake.dat_br import recompress_dat_br
 
@@ -108,6 +108,13 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         patch_file_contexts(source, contexts)
     walk_contexts(fsconfig)
     walk_contexts(contexts)
+    # e2fsdroid's libselinux rejects raw non-ASCII in contexts ("Non-ASCII
+    # characters found"), so feed it a \xNN-escaped copy translated from
+    # the human-readable on-disk file. mkfs.erofs accepts raw non-ASCII and
+    # uses the original directly (see erofs.py).
+    contexts_ascii = contexts + '_ASCII'
+    if not translate_contexts_to_ascii(contexts, contexts_ascii):
+        contexts_ascii = contexts
 
     timestamp = (
         int(time.time())
@@ -141,6 +148,7 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         "size": size,
         "read_mode": read_mode,
         "blocks": blocks,
+        "contexts_ascii": contexts_ascii,
     }
 
 
@@ -186,7 +194,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
         "-T",
         str(state["timestamp"]),
         "-S",
-        contexts,
+        state["contexts_ascii"],
         "-C",
         fsconfig,
         "-a",
