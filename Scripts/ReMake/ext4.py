@@ -102,8 +102,10 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
     if os.path.isfile(distance):
         os.remove(distance)
 
-    patch_fsconfig(source, fsconfig)
-    patch_file_contexts(source, contexts)
+    if V.SETUP_MANIFEST.get("PATCH_FSCONFIG", "1") == "1":
+        patch_fsconfig(source, fsconfig)
+    if V.SETUP_MANIFEST.get("PATCH_CONTEXTS", "1") == "1":
+        patch_file_contexts(source, contexts)
     walk_contexts(fsconfig)
     walk_contexts(contexts)
 

@@ -8,6 +8,8 @@
     "EROFS_LEVEL": "1",
     "EROFS_OLD_KERNEL": "0",
     "REPACK_SPARSE_IMG": "0",
+    "PATCH_FSCONFIG": "1",
+    "PATCH_CONTEXTS": "1",
     "REPACK_BR_LEVEL": "3",
     "SUPER_SIZE": "9126805504",
     "GROUP_NAME": "qti_dynamic_partitions",

@@ -21,6 +21,8 @@ _SETUP_DEFAULTS = {
     'EROFS_LEVEL': "1",
     'EROFS_OLD_KERNEL': "0",
     'REPACK_SPARSE_IMG': "0",
+    'PATCH_FSCONFIG': "1",
+    'PATCH_CONTEXTS': "1",
     'REPACK_BR_LEVEL': "3",
     'SUPER_SIZE': "9126805504",
     'GROUP_NAME': "qti_dynamic_partitions",
@@ -39,7 +41,7 @@ def set_default_env_setup():
 
 def validate_default_env_setup(setup_manifest):
     for k in ('REPACK_EROFS_IMG', 'REPACK_SPARSE_IMG', 'REPACK_TO_RW',
-              'RESIZE_IMG', 'IMAGE_SIZE'):
+              'RESIZE_IMG', 'IMAGE_SIZE', 'PATCH_FSCONFIG', 'PATCH_CONTEXTS'):
         if setup_manifest[k] not in ('1', '0'):
             sys.exit(f"Invalid [{k}] - must be one of <1/0>")
 
@@ -86,6 +88,8 @@ def env_setup():
         ('IMG', [
             ('合成镜像类型[0:EXT4/1:EROFS]', 'REPACK_EROFS_IMG'),
             ('合成镜像格式[0:RAW/1:SPARSE]', 'REPACK_SPARSE_IMG'),
+            ('FS配置补全[0/1]', 'PATCH_FSCONFIG'),
+            ('Contexts补全[0/1]', 'PATCH_CONTEXTS'),
         ]),
         ('BOOT', [
             ('跳过Ramdisk解包打包[0/1]', 'BOOT_SKIP_RAMDISK'),
