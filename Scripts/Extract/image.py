@@ -11,7 +11,7 @@ Format-specific logic lives in:
 """
 
 import os
-import time
+
 from glob import glob
 
 from Scripts.Primary.Utils import V
@@ -52,7 +52,6 @@ def decompress_img(source, distance=None, keep=1):
     purge_partition(partition, V.config, V.layout)
 
     destination = workspace_partition(partition)
-    s_time = time.time()
     file_type = get_file_type(working_source)
     committed = False
 
@@ -98,10 +97,9 @@ def decompress_img(source, distance=None, keep=1):
         return
 
     if committed:
-        print('\x1b[1;32m %ds Done\x1b[0m' % (time.time() - s_time))
+        print('\x1b[1;32mSuccess !\x1b[0m')
     elif file_type not in ('boot', 'vendor_boot'):
-        from rich import print as echo
-        echo('[red][Failed][/]')
+        print('\x1b[1;31mFailed !\x1b[0m')
 
 
 # Batch dispatcher for DAT.BR, DAT, and IMG menu options.
