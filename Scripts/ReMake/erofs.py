@@ -6,6 +6,7 @@ import time
 
 from Scripts.Primary.Utils import (
     CLOSE,
+    GREEN,
     RED,
     V,
     call,
@@ -101,15 +102,20 @@ def _write_image(state, fsconfig, contexts, source, flag):
         ]
     )
 
-    if call(mkerofs_cmd) != 0:
+    print('Process remaking the file system...', end='', flush=True)
+    result = call(mkerofs_cmd, capture=True)
+    if result != 0:
         try:
             os.remove(new_distance)
         except OSError:
             pass
+        print(f'\n{RED}Failed !{CLOSE}')
+        print(f'Process log: {result}')
+        return False
+    print(f'\n{GREEN}Success !{CLOSE}')
     if not os.path.isfile(new_distance):
         return False
 
-    print(" Done")
     if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" or flag > 9:
         print("开始转换: sparse format ...")
         if call(["img2simg", new_distance, distance]) != 0:
@@ -156,16 +162,14 @@ def _update_dynamic_partitions(label, distance):
 def recompress_erofs(source, fsconfig, contexts, dumpinfo, flag=8):
     """Recompress a partition directory into an EROFS image or DAT package."""
     state = _prepare(source, fsconfig, contexts, dumpinfo)
-    printinform = (
-        f"Size:{state['size']}|FsT:erofs|FsR:ro|"
-        f"Sparse:{V.SETUP_MANIFEST['REPACK_SPARSE_IMG']}"
+    sparse = "YES" if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" else "NO"
+    level = V.SETUP_MANIFEST.get("EROFS_LEVEL", "1")
+    method = "lz4hc" if V.SETUP_MANIFEST["RESIZE_EROFSIMG"] == "1" else "lz4"
+    old_kernel = "YES" if V.SETUP_MANIFEST.get("EROFS_OLD_KERNEL", "0") == "1" else "NO"
+    print(
+        f"EROFS: Label:{state['label']} Size:{state['size']} "
+        f"Sparse:{sparse} Level:{level} Method:{method} OLD:{old_kernel}"
     )
-    if V.SETUP_MANIFEST["RESIZE_EROFSIMG"] == "1":
-        printinform += "|lz4hc"
-    elif V.SETUP_MANIFEST["RESIZE_EROFSIMG"] == "2":
-        printinform += "|lz4"
-    print(printinform)
-    print(f"重新合成: {state['label']}.img ...")
     if _write_image(state, fsconfig, contexts, source, flag):
         if _update_dynamic_partitions(state["label"], state["distance"]) and flag > 9:
             recompress_dat_br(state["label"], state["distance"], flag)

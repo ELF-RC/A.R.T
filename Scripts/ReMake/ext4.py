@@ -214,7 +214,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
         e2fsdroid_cmd.append("-s")
     e2fsdroid_cmd.append(new_distance)
 
-    print('Process remaking the file system...', end='')
+    print('Process remaking the file system...', end='', flush=True)
     mkfs_log = call(mke2fs_cmd, capture=True)
     fs_created = os.path.isfile(new_distance)
     if isinstance(mkfs_log, str):
@@ -303,12 +303,12 @@ def _update_dynamic_partitions(label, distance):
 def recompress_ext4(source, fsconfig, contexts, dumpinfo, flag=8):
     """Recompress a partition directory into an EXT4 image or DAT package."""
     state = _prepare(source, fsconfig, contexts, dumpinfo)
-    resize = 1 if V.SETUP_MANIFEST["RESIZE_IMG"] == "1" else 0
+    sparse = "YES" if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" else "NO"
+    resize = "YES" if V.SETUP_MANIFEST["RESIZE_IMG"] == "1" else "NO"
     print(
-        f"Size:{state['size']}|FsT:ext4|FsR:{state['read_mode']}|"
-        f"Sparse:{V.SETUP_MANIFEST['REPACK_SPARSE_IMG']}|Resize:{resize}"
+        f"EXT4FS: Label:{state['label']} Size:{state['size']} "
+        f"Mode:{state['read_mode']} Sparse:{sparse} Resize:{resize}"
     )
-    print(f"重新合成: {state['label']}.img ...")
     if _write_image(state, fsconfig, contexts, source, flag):
         if _update_dynamic_partitions(state["label"], state["distance"]) and flag > 9:
             recompress_dat_br(state["label"], state["distance"], flag)

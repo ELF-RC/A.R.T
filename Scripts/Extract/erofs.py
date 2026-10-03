@@ -102,10 +102,10 @@ def extract_erofs(working_source, partition, destination):
             capture=True,
         )
         if result != 0:
-            print('失败：Failed !')
+            print('Failed !')
             print(f'Process log: {result}')
             return False
-        print('成功：Success !')
+        print('Success !')
         if not _normalize_erofs_metadata(partition, config_dir):
             return False
         return _commit_extracted_partition(

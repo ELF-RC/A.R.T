@@ -438,9 +438,10 @@ def extract_ext4(working_source, partition, destination):
     """
     try:
         output_dir, config_dir = _prepare_partition_output(partition, destination)
-        print(f"> 正在提取 {os.path.basename(working_source)}")
+        print('Process is releasing the file...')
         ULTRAMAN().MONSTER(working_source, str(output_dir))
         _verify_metadata(partition, config_dir)
+        print('Success !')
         return True
     except (
         ImageExtractionError,
@@ -455,5 +456,6 @@ def extract_ext4(working_source, partition, destination):
         OpenDirectoryError,
         MemoryError,
     ) as error:
-        print(f"> EXT4 分解失败: {error}")
+        print('Failed !')
+        print(f'Process log: {error}')
         return False
