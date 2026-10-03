@@ -291,6 +291,8 @@ def patch_fsconfig(dir_path: str, fs_config: str):
     :param fs_config:
     :return:
     """
+    if not os.path.isfile(fs_config):
+        return
     new_fs, new_add = fs_patch(scanfs(os.path.abspath(fs_config)), dir_path)
     with open(fs_config, "w", encoding='utf-8', newline='\n') as f:
         f.writelines([f"{i} {' '.join(new_fs[i])}\n" for i in sorted(new_fs.keys())])
@@ -309,23 +311,22 @@ def patch_file_contexts(dir_path: str, contexts: str):
     longer break ext4 repacking. Paths are regex-escaped so special
     characters match literally, matching AOSP file_contexts convention.
     """
+    if not os.path.isfile(contexts):
+        return
     label = os.path.basename(os.path.abspath(dir_path))
     mount = '/' + label
     DEFAULT_LABEL = 'u:object_r:system_file:s0'
 
     # Read existing rules: escaped_path -> label, preserving first-seen.
     existing = {}
-    try:
-        with open(contexts, 'r', encoding='utf-8') as f:
-            for line in f:
-                parts = line.rstrip('\n').split(None, 1)
-                if len(parts) != 2:
-                    continue
-                path, lbl = parts
-                if path not in existing:
-                    existing[path] = lbl
-    except FileNotFoundError:
-        pass
+    with open(contexts, 'r', encoding='utf-8') as f:
+        for line in f:
+            parts = line.rstrip('\n').split(None, 1)
+            if len(parts) != 2:
+                continue
+            path, lbl = parts
+            if path not in existing:
+                existing[path] = lbl
 
     # Un-escape to literal paths for ancestor-label lookup.
     literal_labels = {
