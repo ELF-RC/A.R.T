@@ -108,6 +108,16 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         patch_file_contexts(source, contexts)
     walk_contexts(fsconfig)
     walk_contexts(contexts)
+    # mke2fs auto-creates a lost+found directory that no source-tree walk
+    # covers; e2fsdroid needs a contexts rule for it or it aborts with
+    # "No such file or directory searching for label". The path is a regex,
+    # so "+" is escaped; append only when missing (mkfs.erofs skips this —
+    # it never builds lost+found).
+    if os.path.isfile(contexts):
+        existing = open(contexts, 'r', encoding='utf-8').read()
+        if 'lost+found' not in existing and 'lost\\+found' not in existing:
+            with open(contexts, 'a', encoding='utf-8', newline='\n') as f:
+                f.write(f'/{label}/lost\\+found u:object_r:system_file:s0\n')
     # e2fsdroid's libselinux rejects raw non-ASCII in contexts ("Non-ASCII
     # characters found"), so feed it a \xNN-escaped copy translated from
     # the human-readable on-disk file. mkfs.erofs accepts raw non-ASCII and
