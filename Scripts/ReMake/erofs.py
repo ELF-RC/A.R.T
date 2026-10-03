@@ -95,7 +95,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
             f"-z{erofs_compress}",
             "-T",
             str(state["timestamp"]),
-            f"--mount-point={label}",
+            f"--mount-point={label if label.startswith('/') else '/' + label}",
             f"--product-out={V.workspace}",
             f"--fs-config-file={fsconfig}",
             f"--file-contexts={contexts}",
