@@ -93,13 +93,12 @@ def extract_erofs(working_source, partition, destination):
         config_dir.mkdir(parents=True, exist_ok=True)
         # Raw image size goes into the global info.json (keyed by partition),
         # not a per-partition _size.txt blob.
-        # erofs has no volume label; the recorded label mirrors the mount
-        # point so a later ext4 repack can pass it to mke2fs -L/-M. The system
-        # partition is system-as-root, so its mount point (and label) is '/'.
-        erofs_label = '/' if partition == 'system' else partition
+        # erofs has no volume label; record the partition name as label so a
+        # later ext4 repack passes /<partition> to mke2fs -L/-M and e2fsdroid
+        # -a, matching the fs_config/contexts prefix (WORKSPACE/<partition>/).
         record_global_info(
             config_dir, partition,
-            {'size': source.stat().st_size, 'type': 'erofs', 'label': erofs_label},
+            {'size': source.stat().st_size, 'type': 'erofs', 'label': partition},
         )
         result = call(
             ['extract.erofs', '-i', str(source), '-o', str(workspace), '-x'],

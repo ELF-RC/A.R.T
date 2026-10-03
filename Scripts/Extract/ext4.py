@@ -230,6 +230,13 @@ class ULTRAMAN(object):
         block_size = 1024 << struct.unpack_from('<L', superblock, 24)[0]
         per_group = struct.unpack_from('<L', superblock, 32)[0]
         label = bytes(superblock[120:136]).rstrip(b'\x00').decode('utf-8', 'replace')
+        # AOSP writes '/' as the volume label for system-as-root; A.R.T keeps
+        # all partition content under WORKSPACE/<partition>/, so fs_config /
+        # contexts carry a <partition>/ prefix and the mount point must be
+        # /<partition> (not '/') for the packer to match. Fall back to the
+        # partition name when the superblock label is '/' or empty.
+        if not label or label == '/':
+            label = self.__file_name(os.path.basename(target))
         manifest = {
             'label': label,
             'type': 'ext4',

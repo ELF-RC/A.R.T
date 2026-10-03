@@ -34,7 +34,7 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
     # --mount-point; partition (dir name) is used for output filenames.
     info_label, _info_size = load_image_json(dumpinfo, source) if dumpinfo else ('', 0)
     partition = os.path.basename(source)
-    label = info_label or partition
+    label = info_label if info_label and info_label != '/' else partition
     os.makedirs(V.out, exist_ok=True)
     distance = os.path.join(V.out, f"{partition}.img")
     if os.path.isfile(distance):
