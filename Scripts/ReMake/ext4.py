@@ -176,9 +176,12 @@ def _write_image(state, fsconfig, contexts, source, flag):
     for _root, dirs, files in os.walk(source):
         inode_count += len(dirs) + len(files)
     inode_count += int(V.SETUP_MANIFEST.get("INODE_MARGIN", "64"))
-    # AOSP passes the same mount-point value to -L (volume label) and -M
-    # (last mount); for system-as-root that value is "/", for other
-    # partitions it is the partition name. Use it raw, no slash prefix.
+    # AOSP passes mount_point to mke2fs -L (volume label) and e2fsdroid -a
+    # (Android mount point). -M in AOSP is the reserved-percent, not a mount
+    # point, so it is not passed here. For system-as-root the value is '/',
+    # for other partitions the partition name; -a needs the full path, so a
+    # leading '/' is added unless the value already starts with one.
+    mount = label if label.startswith('/') else '/' + label
     mke2fs_cmd = [
         "mke2fs",
         "-N",
@@ -189,8 +192,6 @@ def _write_image(state, fsconfig, contexts, source, flag):
         label,
         "-I",
         "256",
-        "-M",
-        label,
         "-m",
         "0",
         "-t",
@@ -210,7 +211,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
         "-C",
         fsconfig,
         "-a",
-        label,
+        mount,
         "-f",
         source,
     ]
