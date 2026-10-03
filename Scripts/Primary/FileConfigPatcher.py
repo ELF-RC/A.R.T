@@ -4,6 +4,8 @@ import os
 import re
 from collections import deque
 
+from Scripts.Primary.Utils import GREEN, CLOSE
+
 
 # ---------------------------------------------------------------------------
 # fsconfig / file_contexts sanitization
@@ -225,7 +227,6 @@ def fs_patch(fs_file, dir_path) -> tuple:  # Compare the two metadata dictionari
     new_fs = {}
     new_add = 0
     r_fs = deque()
-    print(f"FsPatcher: The original file has {len(fs_file.keys()):d} entries")
     for i in scan_dir(os.path.abspath(dir_path)):
         if not i.isprintable():
             tmp = ''
@@ -276,7 +277,6 @@ def fs_patch(fs_file, dir_path) -> tuple:  # Compare the two metadata dictionari
                 config = ['0', gid, mode]
             else:
                 config = ['0', '0', '0644']
-            print(f'Add [{i}{config}]')
             r_fs.append(i)
             new_add += 1
             new_fs[i] = config
@@ -296,7 +296,8 @@ def patch_fsconfig(dir_path: str, fs_config: str):
     new_fs, new_add = fs_patch(scanfs(os.path.abspath(fs_config)), dir_path)
     with open(fs_config, "w", encoding='utf-8', newline='\n') as f:
         f.writelines([f"{i} {' '.join(new_fs[i])}\n" for i in sorted(new_fs.keys())])
-    print(f'FsPatcher: Added {new_add} entries')
+    if new_add:
+        print(f'{GREEN}FsPatcher: Added {new_add} entries{CLOSE}')
 
 
 # Public file_contexts patching entry point used by EXT4/EROFS repacking.
@@ -360,4 +361,4 @@ def patch_file_contexts(dir_path: str, contexts: str):
     if added:
         with open(contexts, 'a', encoding='utf-8', newline='\n') as f:
             f.writelines(new_lines)
-        print(f'ContextsPatcher: Added {added} entries')
+        print(f'{GREEN}ContextsPatcher: Added {added} entries{CLOSE}')
