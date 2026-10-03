@@ -121,7 +121,10 @@ def env_setup():
         if not sum_.isdigit() or int(sum_) not in flat_map:
             continue
         name, key = flat_map[int(sum_)]
-        data[key] = input(name + "：")
+        value = input(name + "：").strip()
+        if not value:
+            value = _SETUP_DEFAULTS.get(key, data.get(key, ""))
+        data[key] = value
         validate_default_env_setup(data)
         with open(SETUP_JSON, 'w', encoding='utf-8') as ss:
             json.dump(data, ss, ensure_ascii=False, indent=4)
