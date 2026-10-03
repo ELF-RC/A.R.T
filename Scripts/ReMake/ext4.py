@@ -96,12 +96,14 @@ def _ext4_image_size(source, block_size=4096):
 
 # Prepare sizes, timestamps, metadata, and output paths.
 def _prepare(source, fsconfig, contexts, dumpinfo):
-    # Authoritative label + original size come from info.json; fall back to
-    # the directory basename when no record exists (e.g. hand-built tree).
+    # label (mount point, may be '/' for system-as-root) and partition (dir
+    # name, used for filenames) come from info.json; the AOSP build passes the
+    # same value to mke2fs -L and -M, so callers use label raw, not prefixed.
     info_label, info_size = load_image_json(dumpinfo, source) if dumpinfo else ('', 0)
-    label = info_label or os.path.basename(source)
+    partition = os.path.basename(source)
+    label = info_label or partition
     os.makedirs(V.out, exist_ok=True)
-    distance = os.path.join(V.out, f"{label}.img")
+    distance = os.path.join(V.out, f"{partition}.img")
     if os.path.isfile(distance):
         os.remove(distance)
 
@@ -114,13 +116,13 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
     # mke2fs auto-creates a lost+found directory that no source-tree walk
     # covers; e2fsdroid needs a contexts rule for it or it aborts with
     # "No such file or directory searching for label". The path is a regex,
-    # so "+" is escaped; append only when missing (mkfs.erofs skips this —
-    # it never builds lost+found).
+    # so "+" is escaped; the prefix uses the partition name (contexts paths
+    # are SELinux paths, not mount points).
     if os.path.isfile(contexts):
         existing = open(contexts, 'r', encoding='utf-8').read()
         if 'lost+found' not in existing and 'lost\\+found' not in existing:
             with open(contexts, 'a', encoding='utf-8', newline='\n') as f:
-                f.write(f'/{label}/lost\\+found u:object_r:system_file:s0\n')
+                f.write(f'/{partition}/lost\\+found u:object_r:system_file:s0\n')
     # e2fsdroid's libselinux rejects raw non-ASCII in contexts ("Non-ASCII
     # characters found"); mkfs.erofs accepts both forms. Normalize the
     # on-disk file to pure ASCII (\xNN byte escapes) in place so both
@@ -144,11 +146,12 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
     block_size = 4096
     blocks = ceil(int(size) / block_size)
     read_mode = "ro" if V.SETUP_MANIFEST["REPACK_TO_RW"] == "0" else "rw"
-    new_distance = os.path.join(V.out, f"{label}_new.img")
+    new_distance = os.path.join(V.out, f"{partition}_new.img")
     if os.path.isfile(new_distance):
         os.remove(new_distance)
     return {
         "label": label,
+        "partition": partition,
         "distance": distance,
         "new_distance": new_distance,
         "timestamp": timestamp,
@@ -173,6 +176,9 @@ def _write_image(state, fsconfig, contexts, source, flag):
     for _root, dirs, files in os.walk(source):
         inode_count += len(dirs) + len(files)
     inode_count += int(V.SETUP_MANIFEST.get("INODE_MARGIN", "64"))
+    # AOSP passes the same mount-point value to -L (volume label) and -M
+    # (last mount); for system-as-root that value is "/", for other
+    # partitions it is the partition name. Use it raw, no slash prefix.
     mke2fs_cmd = [
         "mke2fs",
         "-N",
@@ -184,7 +190,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
         "-I",
         "256",
         "-M",
-        f"/{label}",
+        label,
         "-m",
         "0",
         "-t",
@@ -204,7 +210,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
         "-C",
         fsconfig,
         "-a",
-        f"/{label}",
+        label,
         "-f",
         source,
     ]
@@ -306,9 +312,9 @@ def recompress_ext4(source, fsconfig, contexts, dumpinfo, flag=8):
     sparse = "YES" if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" else "NO"
     resize = "YES" if V.SETUP_MANIFEST["RESIZE_IMG"] == "1" else "NO"
     print(
-        f"EXT4FS: Label:{state['label']} Size:{state['size']} "
+        f"EXT4FS: Label:{state['partition']} Size:{state['size']} "
         f"Mode:{state['read_mode']} Sparse:{sparse} Resize:{resize}"
     )
     if _write_image(state, fsconfig, contexts, source, flag):
-        if _update_dynamic_partitions(state["label"], state["distance"]) and flag > 9:
-            recompress_dat_br(state["label"], state["distance"], flag)
+        if _update_dynamic_partitions(state["partition"], state["distance"]) and flag > 9:
+            recompress_dat_br(state["partition"], state["distance"], flag)

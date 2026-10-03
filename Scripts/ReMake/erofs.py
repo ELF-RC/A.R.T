@@ -30,12 +30,13 @@ def walk_contexts(path):
 
 # Prepare sizes, timestamps, metadata, and output paths.
 def _prepare(source, fsconfig, contexts, dumpinfo):
-    # Authoritative label comes from info.json; fall back to the directory
-    # basename when no record exists.
+    # label (mount point, may be '/' for system-as-root) drives mkfs.erofs
+    # --mount-point; partition (dir name) is used for output filenames.
     info_label, _info_size = load_image_json(dumpinfo, source) if dumpinfo else ('', 0)
-    label = info_label or os.path.basename(source)
+    partition = os.path.basename(source)
+    label = info_label or partition
     os.makedirs(V.out, exist_ok=True)
-    distance = os.path.join(V.out, f"{label}.img")
+    distance = os.path.join(V.out, f"{partition}.img")
     if os.path.isfile(distance):
         os.remove(distance)
 
@@ -61,11 +62,12 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
     if int(size) <= 1048576:
         size = 1048576
 
-    new_distance = os.path.join(V.out, f"{label}_new.img")
+    new_distance = os.path.join(V.out, f"{partition}_new.img")
     if os.path.isfile(new_distance):
         os.remove(new_distance)
     return {
         "label": label,
+        "partition": partition,
         "distance": distance,
         "new_distance": new_distance,
         "timestamp": timestamp,
@@ -93,7 +95,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
             f"-z{erofs_compress}",
             "-T",
             str(state["timestamp"]),
-            f"--mount-point=/{label}",
+            f"--mount-point={label}",
             f"--product-out={V.workspace}",
             f"--fs-config-file={fsconfig}",
             f"--file-contexts={contexts}",
@@ -167,9 +169,9 @@ def recompress_erofs(source, fsconfig, contexts, dumpinfo, flag=8):
     method = "lz4hc" if V.SETUP_MANIFEST["RESIZE_EROFSIMG"] == "1" else "lz4"
     old_kernel = "YES" if V.SETUP_MANIFEST.get("EROFS_OLD_KERNEL", "0") == "1" else "NO"
     print(
-        f"EROFS: Label:{state['label']} Size:{state['size']} "
+        f"EROFS: Label:{state['partition']} Size:{state['size']} "
         f"Sparse:{sparse} Level:{level} Method:{method} OLD:{old_kernel}"
     )
     if _write_image(state, fsconfig, contexts, source, flag):
-        if _update_dynamic_partitions(state["label"], state["distance"]) and flag > 9:
-            recompress_dat_br(state["label"], state["distance"], flag)
+        if _update_dynamic_partitions(state["partition"], state["distance"]) and flag > 9:
+            recompress_dat_br(state["partition"], state["distance"], flag)
