@@ -331,7 +331,7 @@ def menu_main():
                         continue
                     candidates.append((f_basename, source, None, None, True))
                 else:
-                    contexts, fsconfig, _ = partition_metadata_names(f_basename)
+                    contexts, fsconfig = partition_metadata_names(f_basename)
                     contexts = V.config + contexts
                     fsconfig = V.config + fsconfig
                     if not (os.path.isfile(contexts) and os.path.isfile(fsconfig)):
