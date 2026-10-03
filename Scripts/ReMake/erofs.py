@@ -11,7 +11,7 @@ from Scripts.Primary.Utils import (
     call,
     get_dir_size,
 )
-from Scripts.Primary.FileConfigPatcher import patch_fsconfig, sanitize_metadata_files, write_map_file
+from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, sanitize_metadata_files, write_map_file
 from Scripts.Primary.WorkSpace import load_image_json
 from Scripts.ReMake.dat_br import recompress_dat_br
 
@@ -36,6 +36,7 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         os.remove(distance)
 
     patch_fsconfig(source, fsconfig)
+    patch_file_contexts(source, contexts)
     walk_contexts(fsconfig)
     walk_contexts(contexts)
     # mkfs.erofs matches fs_config paths against the source tree literally,

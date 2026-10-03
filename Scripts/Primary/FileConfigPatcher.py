@@ -1,6 +1,7 @@
 """Android fsconfig scanning and metadata patching."""
 
 import os
+import re
 from collections import deque
 
 
@@ -294,3 +295,68 @@ def patch_fsconfig(dir_path: str, fs_config: str):
     with open(fs_config, "w", encoding='utf-8', newline='\n') as f:
         f.writelines([f"{i} {' '.join(new_fs[i])}\n" for i in sorted(new_fs.keys())])
     print(f'FsPatcher: Added {new_add} entries')
+
+
+# Public file_contexts patching entry point used by EXT4/EROFS repacking.
+def patch_file_contexts(dir_path: str, contexts: str):
+    """Add file_contexts label rules for on-disk paths missing one.
+
+    Mirrors patch_fsconfig: e2fsdroid resolves an SELinux label for every
+    on-disk path via ``-S contexts``; a path with no matching rule aborts
+    with "No such file or directory searching for label". This walks the
+    source tree and back-fills missing paths with the nearest ancestor's
+    label (defaulting to system_file), so user-added or renamed entries no
+    longer break ext4 repacking. Paths are regex-escaped so special
+    characters match literally, matching AOSP file_contexts convention.
+    """
+    label = os.path.basename(os.path.abspath(dir_path))
+    mount = '/' + label
+    DEFAULT_LABEL = 'u:object_r:system_file:s0'
+
+    # Read existing rules: escaped_path -> label, preserving first-seen.
+    existing = {}
+    try:
+        with open(contexts, 'r', encoding='utf-8') as f:
+            for line in f:
+                parts = line.rstrip('\n').split(None, 1)
+                if len(parts) != 2:
+                    continue
+                path, lbl = parts
+                if path not in existing:
+                    existing[path] = lbl
+    except FileNotFoundError:
+        pass
+
+    # Un-escape to literal paths for ancestor-label lookup.
+    literal_labels = {
+        re.sub(r'\\(.)', r'\1', esc): lbl for esc, lbl in existing.items()
+    }
+
+    def ancestor_label(full):
+        parts = full.split('/')
+        for i in range(len(parts), 0, -1):
+            ancestor = '/'.join(parts[:i])
+            if ancestor in literal_labels:
+                return literal_labels[ancestor]
+        return None
+
+    added = 0
+    new_lines = []
+    for root, dirs, files in os.walk(dir_path):
+        rel = os.path.relpath(root, dir_path)
+        prefix = mount if rel == '.' else mount + '/' + rel.replace(os.sep, '/')
+        for name in dirs + files:
+            full = prefix + '/' + name
+            esc = re.escape(full)
+            if esc in existing:
+                continue
+            lbl = ancestor_label(full) or DEFAULT_LABEL
+            new_lines.append(f'{esc} {lbl}\n')
+            existing[esc] = lbl
+            literal_labels[full] = lbl
+            added += 1
+
+    if added:
+        with open(contexts, 'a', encoding='utf-8', newline='\n') as f:
+            f.writelines(new_lines)
+        print(f'ContextsPatcher: Added {added} entries')
