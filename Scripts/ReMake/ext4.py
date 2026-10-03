@@ -31,17 +31,30 @@ def walk_contexts(path):
 
 # Compute an ext4 image size that fits the source tree plus metadata.
 def _ext4_image_size(source, block_size=4096):
-    """Size an ext4 image to hold the source tree plus ext4 metadata.
+    """Size an ext4 image to fit the source tree plus real ext4 metadata.
 
-    get_dir_size counts only file bytes; ext4 also needs directory-entry
-    blocks (one per directory), the inode table (256 B per entry), and
-    per-group bitmaps/GDT/superblock backups. Without those, small or
-    file-dense partitions exhaust data blocks ("Could not allocate block")
-    even when the raw byte count looks ample.
+    Models the on-disk layout the mke2fs flags below produce (^has_journal,
+    ^metadata_csum, ^flex_bg, ^64bit -> 32-byte group descriptors, 256-B
+    inodes). For each block group: a block bitmap, an inode bitmap, and an
+    inode table whose width follows from inodes_per_group. Group 0 also
+    carries the superblock and the group-descriptor table (plus a small
+    resize_inode reservation). The block count determines the group count,
+    which determines the per-group metadata, which feeds back into the block
+    count — so it iterates to convergence (1-2 passes for typical sizes).
+
+    No fixed floor: the lower bound is whatever the metadata itself needs,
+    so a 315 KB tree is no longer padded to 1 MB.
     """
+    # Layout constants matching _write_image's mke2fs flags.
+    blocks_per_group = block_size * 8           # 32768 at 4K blocks
+    inode_size = 256                             # -I 256
+    desc_size = 32                               # ^64bit -> 32-B descriptors
+    reserved_gdt = 2                             # resize_inode reservation (conservative)
+
+    # Walk the source tree once.
     data_blocks = 0
     dir_count = 0
-    entry_count = 1  # the partition root itself
+    entry_count = 1  # partition root
     for _root, dirs, files in os.walk(source):
         dir_count += len(dirs)
         entry_count += len(dirs) + len(files)
@@ -52,14 +65,30 @@ def _ext4_image_size(source, block_size=4096):
                     data_blocks += ceil(os.path.getsize(path) / block_size)
                 except OSError:
                     pass
+
     # Each directory occupies at least one block of directory entries.
     dir_blocks = dir_count
-    # Inode table: 256 bytes per inode, one inode per filesystem entry.
-    inode_blocks = ceil(entry_count * 256 / block_size)
-    # 10% margin for per-group metadata, extent trees, and slack; +64 for
-    # lost+found and minor post-extract edits.
-    total_blocks = ceil((data_blocks + dir_blocks + inode_blocks) * 1.1) + 64
-    return max(total_blocks * block_size, 1048576)
+    # One inode per entry plus a small margin for lost+found and edits.
+    inode_count = entry_count + 16
+    base_blocks = data_blocks + dir_blocks
+
+    # Iterate: total blocks -> group count -> per-group metadata -> total.
+    total = base_blocks
+    for _ in range(8):
+        groups = max(1, ceil(total / blocks_per_group))
+        inodes_per_group = ceil(inode_count / groups)
+        inode_table_per_group = ceil(inodes_per_group * inode_size / block_size)
+        per_group_meta = 2 + inode_table_per_group   # block bitmap + inode bitmap + inode table
+        gdt_blocks = ceil(groups * desc_size / block_size)
+        # Group 0: superblock + GDT (+ reservation) + its own bitmaps/inode table.
+        # Sparse-super backups in groups 1/3^n/5^n/7^n add at most a few blocks,
+        # absorbed by the margin below.
+        total = base_blocks + groups * per_group_meta + 1 + gdt_blocks + reserved_gdt
+
+    # 3% margin for extent trees, large directories, sparse-super backups,
+    # and minor post-extract edits; +16 blocks for lost+found and rounding.
+    total = ceil(total * 1.03) + 16
+    return total * block_size
 
 
 # Prepare sizes, timestamps, metadata, and output paths.
