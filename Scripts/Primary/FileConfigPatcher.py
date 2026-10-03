@@ -192,14 +192,14 @@ def sanitize_metadata_files(fsconfig_path, contexts_path):
 
 
 def translate_contexts_to_ascii(src_contexts, dst_contexts):
-    """Copy a file_contexts file with non-ASCII bytes escaped as \\xNN.
+    """Normalize a file_contexts file to pure ASCII (\\xNN byte escapes).
 
-    The on-disk contexts stays human-readable (raw UTF-8, e.g.
-    /mi_ext/新建文件夹); e2fsdroid's libselinux rejects raw non-ASCII with
-    "Non-ASCII characters found", so ext4 packing feeds it this escaped
-    copy instead. mkfs.erofs accepts raw non-ASCII and uses the original
-    directly. Each path-regex line is escaped in place; blank / malformed
-    lines pass through unchanged. Always overwrites dst_contexts.
+    e2fsdroid's libselinux rejects raw non-ASCII ("Non-ASCII characters
+    found"); mkfs.erofs accepts both raw and escaped forms. To keep one
+    shared on-disk file for both packers, contexts are normalized in place
+    (src == dst is safe: the file is fully read into memory before being
+    rewritten). Each path-regex line has its non-ASCII bytes escaped; blank
+    / malformed lines pass through unchanged.
     """
     if not os.path.isfile(src_contexts):
         return False

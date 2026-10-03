@@ -244,7 +244,6 @@ def partition_metadata_names(partition):
         f'{partition}_file_contexts',
         f'{partition}_fs_config',
         f'{partition}_special',
-        f'{partition}_file_contexts_ASCII',
     )
 
 

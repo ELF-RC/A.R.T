@@ -119,12 +119,10 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
             with open(contexts, 'a', encoding='utf-8', newline='\n') as f:
                 f.write(f'/{label}/lost\\+found u:object_r:system_file:s0\n')
     # e2fsdroid's libselinux rejects raw non-ASCII in contexts ("Non-ASCII
-    # characters found"), so feed it a \xNN-escaped copy translated from
-    # the human-readable on-disk file. mkfs.erofs accepts raw non-ASCII and
-    # uses the original directly (see erofs.py).
-    contexts_ascii = contexts + '_ASCII'
-    if not translate_contexts_to_ascii(contexts, contexts_ascii):
-        contexts_ascii = contexts
+    # characters found"); mkfs.erofs accepts both forms. Normalize the
+    # on-disk file to pure ASCII (\xNN byte escapes) in place so both
+    # packers share one file and no separate copy is needed.
+    translate_contexts_to_ascii(contexts, contexts)
 
     timestamp = (
         int(time.time())
@@ -158,7 +156,6 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         "size": size,
         "read_mode": read_mode,
         "blocks": blocks,
-        "contexts_ascii": contexts_ascii,
     }
 
 
@@ -204,7 +201,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
         "-T",
         str(state["timestamp"]),
         "-S",
-        state["contexts_ascii"],
+        contexts,
         "-C",
         fsconfig,
         "-a",

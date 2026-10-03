@@ -11,7 +11,7 @@ from Scripts.Primary.Utils import (
     call,
     get_dir_size,
 )
-from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts
+from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, translate_contexts_to_ascii
 from Scripts.Primary.WorkSpace import load_image_json
 from Scripts.ReMake.dat_br import recompress_dat_br
 
@@ -41,9 +41,10 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         patch_file_contexts(source, contexts)
     walk_contexts(fsconfig)
     walk_contexts(contexts)
-    # mkfs.erofs accepts raw non-ASCII in file_contexts, so it uses the
-    # human-readable on-disk file directly (no \xNN escaping needed).
-    # Space-bearing components are already underscored on disk.
+    # Normalize the on-disk contexts to pure ASCII (\xNN byte escapes).
+    # e2fsdroid requires this (libselinux rejects raw non-ASCII); mkfs.erofs
+    # accepts both, so both packers share the single normalized file.
+    translate_contexts_to_ascii(contexts, contexts)
 
     timestamp = (
         int(time.time())
