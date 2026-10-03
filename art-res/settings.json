@@ -2,6 +2,7 @@
     "REPACK_EROFS_IMG": "1",
     "REPACK_TO_RW": "0",
     "RESIZE_IMG": "0",
+    "IMAGE_SIZE": "0",
     "RESIZE_EROFSIMG": "1",
     "EROFS_LEVEL": "1",
     "EROFS_OLD_KERNEL": "0",

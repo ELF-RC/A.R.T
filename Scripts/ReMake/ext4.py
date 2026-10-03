@@ -79,19 +79,22 @@ def _prepare(source, fsconfig, contexts, dumpinfo):
         if V.SETUP_MANIFEST["UTC"].lower() == "live"
         else V.SETUP_MANIFEST["UTC"]
     )
-    # fsize (original image size, if known) only selects ro/rw for the
-    # banner; the filesystem size is computed from the live source tree so
-    # it always fits data + ext4 metadata.
+    # fsize is the original image size (ext4 's' or erofs 'size'). It is used
+    # when IMAGE_SIZE=1 to repack at the original footprint; IMAGE_SIZE=0
+    # sizes from the live source tree so it always fits data + ext4 metadata.
     fsize = None
     if dumpinfo:
         fsize, _dsize, _inodes, _old_block_size, _old_blocks, _per_group, _mount_point = (
             load_image_json(dumpinfo, source)
         )
-    size = _ext4_image_size(source)
+    if V.SETUP_MANIFEST["IMAGE_SIZE"] == "1" and fsize:
+        size = max(int(fsize), 1048576)
+    else:
+        size = _ext4_image_size(source)
 
     block_size = 4096
     blocks = ceil(int(size) / block_size)
-    read_mode = "ro" if fsize else "rw"
+    read_mode = "ro" if V.SETUP_MANIFEST["REPACK_TO_RW"] == "0" else "rw"
     new_distance = os.path.join(V.out, f"{label}_new.img")
     if os.path.isfile(new_distance):
         os.remove(new_distance)
@@ -155,8 +158,12 @@ def _write_image(state, fsconfig, contexts, source, flag):
         f"/{label}",
         "-f",
         source,
-        new_distance,
     ]
+    # REPACK_TO_RW=0 (read-only): e2fsdroid -s squashes permissions to the
+    # fs_config values, matching DNA's ro packaging.
+    if V.SETUP_MANIFEST["REPACK_TO_RW"] == "0":
+        e2fsdroid_cmd.append("-s")
+    e2fsdroid_cmd.append(new_distance)
 
     print('Process remaking the file system...', end='')
     mkfs_log = call(mke2fs_cmd, capture=True)
@@ -194,6 +201,13 @@ def _write_image(state, fsconfig, contexts, source, flag):
             return False
 
     print(f'\n{GREEN}Success !{CLOSE}')
+    # RESIZE_IMG=1: shrink the image to its minimum footprint (resize2fs -M),
+    # matching DNA's "压缩EXT4镜像空间" behaviour. The image is already valid
+    # at this point, so a resize2fs failure is warned, not fatal.
+    if V.SETUP_MANIFEST["RESIZE_IMG"] == "1":
+        result = call(["resize2fs", "-M", new_distance], capture=True)
+        if isinstance(result, str):
+            print(f'\n{YELLOW}resize2fs 警告:{CLOSE} {result}')
     if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" or flag > 9:
         print("开始转换: sparse format ...")
         if call(["img2simg", new_distance, distance]) != 0:
@@ -240,12 +254,7 @@ def _update_dynamic_partitions(label, distance):
 def recompress_ext4(source, fsconfig, contexts, dumpinfo, flag=8):
     """Recompress a partition directory into an EXT4 image or DAT package."""
     state = _prepare(source, fsconfig, contexts, dumpinfo)
-    resize = (
-        1
-        if V.SETUP_MANIFEST["RESIZE_IMG"] == "1"
-        and V.SETUP_MANIFEST["REPACK_TO_RW"] == "1"
-        else 0
-    )
+    resize = 1 if V.SETUP_MANIFEST["RESIZE_IMG"] == "1" else 0
     print(
         f"Size:{state['size']}|FsT:ext4|FsR:{state['read_mode']}|"
         f"Sparse:{V.SETUP_MANIFEST['REPACK_SPARSE_IMG']}|Resize:{resize}"

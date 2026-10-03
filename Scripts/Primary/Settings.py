@@ -15,6 +15,7 @@ _SETUP_DEFAULTS = {
     'REPACK_EROFS_IMG': "1",
     'REPACK_TO_RW': "0",
     'RESIZE_IMG': "0",
+    'IMAGE_SIZE': "0",
     'RESIZE_EROFSIMG': "1",
     'EROFS_LEVEL': "1",
     'EROFS_OLD_KERNEL': "0",
@@ -37,7 +38,7 @@ def set_default_env_setup():
 
 def validate_default_env_setup(setup_manifest):
     for k in ('REPACK_EROFS_IMG', 'REPACK_SPARSE_IMG', 'REPACK_TO_RW',
-              'RESIZE_IMG'):
+              'RESIZE_IMG', 'IMAGE_SIZE'):
         if setup_manifest[k] not in ('1', '0'):
             sys.exit(f"Invalid [{k}] - must be one of <1/0>")
 
@@ -65,8 +66,9 @@ def env_setup():
     """Interactive settings editor."""
     categories = [
         ('EXT4', [
-            ('合成EXT4动态分区状态[0:RO/1:RW]', 'REPACK_TO_RW'),
-            ('合成EXT4压缩分区空间[0/1]', 'RESIZE_IMG'),
+            ('合成EXT4分区状态[0:RO/1:RW]', 'REPACK_TO_RW'),
+            ('是否压缩EXT4镜像空间[0/1]', 'RESIZE_IMG'),
+            ('镜像大小[0:自动计算大小/1:原大小]', 'IMAGE_SIZE'),
         ]),
         ('EROFS', [
             ('合成EROFS压缩算法[0:NO/1:LZ4HC/2:LZ4]', 'RESIZE_EROFSIMG'),
