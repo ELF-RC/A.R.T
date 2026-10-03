@@ -292,6 +292,31 @@ def prune_global_info(config_dir, layout):
     )
 
 
+def purge_partition(partition, config_dir, layout):
+    """Remove a partition's prior extraction state before re-extracting.
+
+    Clears WORKSPACE/<partition>/, its fs_config/contexts/special metadata,
+    and the partition's entry in config/info.json so a re-extract starts from
+    a clean slate instead of mixing stale and fresh files.
+    """
+    part_dir = layout.partition_dir(partition)
+    if part_dir.is_dir():
+        shutil.rmtree(part_dir, ignore_errors=True)
+    config_path = Path(config_dir)
+    if config_path.is_dir():
+        for name in partition_metadata_names(partition):
+            try:
+                (config_path / name).unlink()
+            except OSError:
+                pass
+    info = load_global_info(config_dir)
+    if partition in info:
+        del info[partition]
+        global_info_path(config_dir).write_text(
+            _json.dumps(info, indent=4), encoding='utf-8'
+        )
+
+
 def metadata_path(config_dir, partition, suffix):
     return Path(config_dir) / f'{partition}{suffix}'
 

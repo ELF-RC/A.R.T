@@ -20,6 +20,7 @@ from Scripts.Primary.WorkSpace import LayoutError
 from Scripts.Primary.WorkSpace import (
     partition_name, workspace_partition, workspace_temp,
     _destination_partition, _stage_work_source, envelop_project,
+    purge_partition,
 )
 
 
@@ -44,6 +45,11 @@ def decompress_img(source, distance=None, keep=1):
     except (LayoutError, OSError) as error:
         print(f'> 无法准备镜像: {error}')
         return
+
+    # Drop any prior extraction of this partition so re-extracting starts
+    # clean: WORKSPACE/<partition>/, its fs_config/contexts/special, and the
+    # info.json entry are all removed before the extractor runs.
+    purge_partition(partition, V.config, V.layout)
 
     destination = workspace_partition(partition)
     s_time = time.time()
