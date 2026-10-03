@@ -16,6 +16,7 @@ _SETUP_DEFAULTS = {
     'REPACK_TO_RW': "0",
     'RESIZE_IMG': "0",
     'IMAGE_SIZE': "0",
+    'INODE_MARGIN': "64",
     'RESIZE_EROFSIMG': "1",
     'EROFS_LEVEL': "1",
     'EROFS_OLD_KERNEL': "0",
@@ -49,6 +50,8 @@ def validate_default_env_setup(setup_manifest):
     if not re.match("\\d{1,3}", setup_manifest["UNPACK_SPLIT_DAT"]):
         sys.exit(
             f'Invalid ["UNPACK_SPLIT_DAT" : "{setup_manifest["UNPACK_SPLIT_DAT"]}"] - must be one of <1-999>')
+    if not setup_manifest["INODE_MARGIN"].isdigit() or int(setup_manifest["INODE_MARGIN"]) < 1:
+        sys.exit(f'Invalid [INODE_MARGIN] - must be a positive integer')
 
 
 # Load, normalize, validate, and persist settings.
@@ -69,6 +72,7 @@ def env_setup():
             ('合成EXT4分区状态[0:RO/1:RW]', 'REPACK_TO_RW'),
             ('是否压缩EXT4镜像空间[0/1]', 'RESIZE_IMG'),
             ('镜像大小[0:自动计算大小/1:原大小]', 'IMAGE_SIZE'),
+            ('EXT4 inode余量[64]', 'INODE_MARGIN'),
         ]),
         ('EROFS', [
             ('合成EROFS压缩算法[0:NO/1:LZ4HC/2:LZ4]', 'RESIZE_EROFSIMG'),

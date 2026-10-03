@@ -68,8 +68,11 @@ def _ext4_image_size(source, block_size=4096):
 
     # Each directory occupies at least one block of directory entries.
     dir_blocks = dir_count
-    # One inode per entry plus a small margin for lost+found and edits.
-    inode_count = entry_count + 16
+    # One inode per entry plus the configurable margin (default 64) for
+    # lost+found and post-extract edits; matches the -N value _write_image
+    # passes to mke2fs so the inode-table block estimate stays accurate.
+    margin = int(V.SETUP_MANIFEST.get("INODE_MARGIN", "64"))
+    inode_count = entry_count + margin
     base_blocks = data_blocks + dir_blocks
 
     # Iterate: total blocks -> group count -> per-group metadata -> total.
@@ -152,7 +155,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
     inode_count = 1
     for _root, dirs, files in os.walk(source):
         inode_count += len(dirs) + len(files)
-    inode_count += 64
+    inode_count += int(V.SETUP_MANIFEST.get("INODE_MARGIN", "64"))
     mke2fs_cmd = [
         "mke2fs",
         "-N",
