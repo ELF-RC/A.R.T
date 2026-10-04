@@ -1,6 +1,7 @@
 """DAT/DAT.BR repacker for block packages."""
 
 import os
+import sys
 import tempfile
 
 from Scripts.Primary import SparseMap
@@ -1168,9 +1169,6 @@ class BlockImageDiff(object):
 # Convert one image into new.dat and transfer.list.
 def _image_to_dat(input_image, outdir='.', version=None, prefix='system'):
     """Convert an image into Android block OTA package files."""
-    version_text = '1.7'
-    print('img2sdat binary - version: %s\n' % version_text)
-
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
 
@@ -1181,7 +1179,13 @@ def _image_to_dat(input_image, outdir='.', version=None, prefix='system'):
     # fd + temp-file leaks on every DAT/BR repack.
     map_fd, map_path = tempfile.mkstemp(prefix='art-filemap-')
     os.close(map_fd)
+    # BlockImageDiff.Compute prints a dozen progress lines (stash stats,
+    # patch computation, vertex ordering, ...). Silence them to match the
+    # erofs/ext4 repack banner style: the caller prints Process remaking +
+    # Success/Failed; internal detail is noise here.
+    _real_stdout = sys.stdout
     try:
+        sys.stdout = open(os.devnull, 'w')
         sparse = SparseMap.SparseImage(input_image, map_path, '0')
         try:
             BlockImageDiff(sparse, None, version).Compute(output_prefix)
@@ -1193,11 +1197,14 @@ def _image_to_dat(input_image, outdir='.', version=None, prefix='system'):
                 pass
     finally:
         try:
+            sys.stdout.close()
+        except OSError:
+            pass
+        sys.stdout = _real_stdout
+        try:
             os.unlink(map_path)
         except OSError:
             pass
-
-    print('Done! Output files: %s' % os.path.dirname(output_prefix))
 
 
 # Public DAT/DAT.BR repack entry point.
@@ -1206,21 +1213,20 @@ def recompress_dat_br(label, distance, flag):
     if flag <= 9:
         return
 
-    print(f"重新生成: {label}.new.dat ...")
-    _image_to_dat(distance, V.out, 4, label)
-    newdat = os.path.join(V.out, f"{label}.new.dat")
-    if not os.path.isfile(newdat):
-        print(f" {RED}打包失败{CLOSE}")
-        return
-    print(" Done")
-    os.remove(distance)
-    if flag == 11:
-        level = V.SETUP_MANIFEST["REPACK_BR_LEVEL"]
-        print(f"重新生成: {label}.new.dat.br | Level={level} ...")
-        newdat_brotli = f"{newdat}.br"
-        call(["brotli", "-q", level, "-j", "-f", "-T", "8", "-o", newdat_brotli, newdat])
-        print(
-            f" {GREEN}打包成功{CLOSE}"
-            if os.path.isfile(newdat_brotli)
-            else f" {RED}打包失败{CLOSE}"
-        )
+    print('Process remaking the file system...', end='', flush=True)
+    try:
+        _image_to_dat(distance, V.out, 4, label)
+        newdat = os.path.join(V.out, f"{label}.new.dat")
+        if not os.path.isfile(newdat):
+            raise OSError('未生成 .new.dat')
+        os.remove(distance)
+        if flag == 11:
+            level = V.SETUP_MANIFEST["REPACK_BR_LEVEL"]
+            newdat_brotli = f"{newdat}.br"
+            rc = call(["brotli", "-q", level, "-j", "-f", "-T", "8", "-o", newdat_brotli, newdat])
+            if rc != 0 or not os.path.isfile(newdat_brotli):
+                raise OSError('brotli 压缩失败')
+        print(f'\n{GREEN}Success !{CLOSE}')
+    except (OSError, ValueError) as error:
+        print(f'\n{RED}Failed !{CLOSE}')
+        print(f'Process log: {error}')

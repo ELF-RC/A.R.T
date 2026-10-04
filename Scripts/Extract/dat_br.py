@@ -94,14 +94,6 @@ def _write_zeroes(output, count):
 def _sdat2img_main(transfer_list_file, new_data_file, output_image_file):
     """Build one raw image and remove an incomplete output on failure."""
     version, new_blocks, commands = _parse_transfer_list(transfer_list_file)
-    print(f'sdat2img binary - version: 1.2\n')
-    android_versions = {
-        1: 'Android Lollipop 5.0',
-        2: 'Android Lollipop 5.1',
-        3: 'Android Marshmallow 6.x',
-        4: 'Android Nougat 7.x / Oreo 8.x',
-    }
-    print(f'{android_versions.get(version, "Unknown Android")} detected!\n')
 
     output_path = Path(output_image_file)
     source_path = Path(new_data_file)
@@ -120,7 +112,6 @@ def _sdat2img_main(transfer_list_file, new_data_file, output_image_file):
                     block_count = end - begin
                     output.seek(begin * BLOCK_SIZE)
                     if command == 'new':
-                        print(f'\rCopying {block_count} blocks into position {begin}...', end='')
                         for _ in range(block_count):
                             block = new_data.read(BLOCK_SIZE)
                             if len(block) != BLOCK_SIZE:
@@ -138,7 +129,6 @@ def _sdat2img_main(transfer_list_file, new_data_file, output_image_file):
             pass
         raise
 
-    print(f'Done! Output image: {output_path.resolve()}')
     return str(output_path)
 
 
