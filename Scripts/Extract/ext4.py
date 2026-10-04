@@ -327,8 +327,10 @@ class ULTRAMAN(object):
                 elif file_type == EXT4_FT.REG_FILE:
                     # Phase 1: defer data extraction to phase 2. The inode
                     # index is re-resolved per-worker via a dedicated Volume
-                    # (inodes bind to the Volume that created them).
-                    file_tasks.append((entry_inode_idx, str(target), mode, uid, gid))
+                    # (inodes bind to the Volume that created them). i_size
+                    # drives the size-aware chunking in phase 2 so a few large
+                    # files don't stall a single worker.
+                    file_tasks.append((entry_inode_idx, str(target), mode, uid, gid, int(entry_inode.i_size)))
                     self.fsconfig.append(f'{fs_path} {uid} {gid} {mode}{cap}')
                 elif file_type == EXT4_FT.SYMLINK:
                     link_target = read_link(entry_inode, volume)
@@ -388,17 +390,22 @@ class ULTRAMAN(object):
         if workers <= 1:
             _dump_files(self.OUTPUT_IMAGE_FILE, file_tasks)
             return
-        # Split evenly; each chunk holds disjoint inode indices whose extents
-        # occupy disjoint disk blocks, so workers seek without contention.
-        chunk_size = (total + workers - 1) // workers
-        chunks = [
-            file_tasks[i:i + chunk_size]
-            for i in range(0, total, chunk_size)
-        ]
-        with ProcessPoolExecutor(max_workers=len(chunks)) as executor:
+        # Size-aware greedy chunking: sort by size descending, then assign
+        # each file to the worker with the smallest accumulated bytes. This
+        # keeps a few large files (e.g. webview.apk ~180MB) from stalling one
+        # worker while others idle on small files. Each chunk still holds
+        # disjoint inode indices whose extents occupy disjoint disk blocks.
+        sorted_tasks = sorted(file_tasks, key=lambda t: t[5], reverse=True)
+        chunks = [[] for _ in range(workers)]
+        loads = [0] * workers
+        for task in sorted_tasks:
+            w = loads.index(min(loads))
+            chunks[w].append(task)
+            loads[w] += task[5]
+        with ProcessPoolExecutor(max_workers=workers) as executor:
             futures = [
                 executor.submit(_dump_files, self.OUTPUT_IMAGE_FILE, chunk)
-                for chunk in chunks
+                for chunk in chunks if chunk
             ]
             for future in as_completed(futures):
                 future.result()
@@ -415,7 +422,7 @@ def _dump_files(image_path, chunk):
     from Scripts.Primary.EXT4Core import Volume
     with open(image_path, 'rb') as stream:
         volume = Volume(stream, ignore_attr_name_index=True)
-        for inode_idx, target, mode, uid, gid in chunk:
+        for inode_idx, target, mode, uid, gid, _size in chunk:
             inode = volume.inodes[inode_idx]
             reader = inode.open()
             try:
