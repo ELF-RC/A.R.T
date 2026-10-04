@@ -422,27 +422,76 @@ def _dump_files(image_path, chunk):
     from Scripts.Primary.EXT4Core import Volume
     with open(image_path, 'rb') as stream:
         volume = Volume(stream, ignore_attr_name_index=True)
+        block_size = volume.block_size
+        base = volume.offset
         for inode_idx, target, mode, uid, gid, _size in chunk:
             inode = volume.inodes[inode_idx]
-            reader = inode.open()
             try:
                 with open(target, 'xb') as out:
-                    while True:
-                        data = reader.read(1024 * 1024)
-                        if not data:
-                            break
-                        if out.write(data) != len(data):
-                            raise ImageExtractionError(
-                                f'EXT4 文件写入不完整: {target}'
+                    if inode.is_inline:
+                        # Inline data lives in the inode block itself; BlockIO
+                        # handles that via BytesIO, so fall back to it.
+                        reader = inode.open()
+                        try:
+                            while True:
+                                data = reader.read(1024 * 1024)
+                                if not data:
+                                    break
+                                out.write(data)
+                        finally:
+                            close_reader = getattr(reader, 'close', None)
+                            if close_reader:
+                                close_reader()
+                    else:
+                        # Read each leaf extent in one shot instead of 4KB-
+                        # per-block through BlockIO.peek(): a 173MB file with
+                        # 51 extents drops from ~45000 seek+read calls to 51,
+                        # and a small one-extent file drops from N to 1.
+                        file_size = int(inode.i_size)
+                        written = 0
+                        next_block = 0
+                        for extent in inode.extents:
+                            if written >= file_size:
+                                break
+                            ee_block = int(extent.ee_block)
+                            ee_len = extent.len
+                            # Fill any hole between the previous extent and
+                            # this one (implicit zero region).
+                            if ee_block > next_block:
+                                hole = min(
+                                    (ee_block - next_block) * block_size,
+                                    file_size - written,
+                                )
+                                out.write(b'\x00' * hole)
+                                written += hole
+                            data_len = min(
+                                ee_len * block_size, file_size - written
                             )
+                            if extent.is_initialized:
+                                stream.seek(
+                                    base + extent.ee_start * block_size
+                                )
+                                data = stream.read(data_len)
+                                if len(data) != data_len:
+                                    raise ImageExtractionError(
+                                        f'EXT4 文件读取不完整: {target}'
+                                    )
+                                out.write(data)
+                            else:
+                                # Uninitialized extent within file: zeros.
+                                out.write(b'\x00' * data_len)
+                            written += data_len
+                            next_block = ee_block + ee_len
+                        # Fill any trailing hole between the last extent and
+                        # the file size (BlockIO returns null_block for these
+                        # logical blocks, so the on-disk tree expects zeros).
+                        if written < file_size:
+                            out.write(b'\x00' * (file_size - written))
+                            written = file_size
             except OSError as error:
                 raise ImageExtractionError(
                     f'EXT4 文件写入失败: {target}: {error}'
                 ) from error
-            finally:
-                close_reader = getattr(reader, 'close', None)
-                if close_reader:
-                    close_reader()
             if os.geteuid() == 0:
                 os.chmod(target, int(mode, 8))
                 os.chown(target, uid, gid)
