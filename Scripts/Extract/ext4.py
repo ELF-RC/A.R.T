@@ -236,7 +236,7 @@ class ULTRAMAN(object):
         # /<partition> (not '/') for the packer to match. Fall back to the
         # partition name when the superblock label is '/' or empty.
         if not label or label == '/':
-            label = self.__file_name(os.path.basename(target))
+            label = self.FileName
         manifest = {
             'label': label,
             'type': 'ext4',
