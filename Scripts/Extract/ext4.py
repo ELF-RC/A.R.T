@@ -11,6 +11,8 @@ import os
 import re
 import shutil
 import struct
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import cpu_count
 from pathlib import Path
 
 from Scripts.Primary.WorkSpace import record_global_info
@@ -244,6 +246,11 @@ class ULTRAMAN(object):
         }
 
         seen_targets = set()
+        # Regular files are collected here in phase 1 and extracted
+        # concurrently in phase 2; each entry is the inode index plus the
+        # on-disk target + mode (per-worker re-resolves the inode via its
+        # own Volume since inodes bind to the Volume that created them).
+        file_tasks = []
 
         def output_path(components):
             # All on-disk names are kept verbatim (non-ASCII is handled by the
@@ -271,23 +278,6 @@ class ULTRAMAN(object):
             if isinstance(inode, Inode):
                 return inode.readlink().decode('utf-8')
             return ''
-
-        def write_file(inode, target):
-            reader = inode.open()
-            try:
-                with open(target, 'xb') as out:
-                    while True:
-                        chunk = reader.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        if out.write(chunk) != len(chunk):
-                            raise ImageExtractionError(f'EXT4 文件写入不完整: {target}')
-            except OSError as error:
-                raise ImageExtractionError(f'EXT4 文件写入失败: {target}: {error}') from error
-            finally:
-                close_reader = getattr(reader, 'close', None)
-                if close_reader:
-                    close_reader()
 
         def scan_dir(root_inode, volume, components=()):
             for entry, file_type in root_inode.opendir():
@@ -335,10 +325,10 @@ class ULTRAMAN(object):
                     self.fsconfig.append(f'{fs_path} {uid} {gid} {mode}{cap}')
                     scan_dir(entry_inode, volume, entry_components)
                 elif file_type == EXT4_FT.REG_FILE:
-                    write_file(entry_inode, target)
-                    if os.geteuid() == 0:
-                        os.chmod(target, int(mode, 8))
-                        os.chown(target, uid, gid)
+                    # Phase 1: defer data extraction to phase 2. The inode
+                    # index is re-resolved per-worker via a dedicated Volume
+                    # (inodes bind to the Volume that created them).
+                    file_tasks.append((entry_inode_idx, str(target), mode, uid, gid))
                     self.fsconfig.append(f'{fs_path} {uid} {gid} {mode}{cap}')
                 elif file_type == EXT4_FT.SYMLINK:
                     link_target = read_link(entry_inode, volume)
@@ -357,6 +347,16 @@ class ULTRAMAN(object):
             # warn and skip them instead of aborting the whole extraction.
             volume = Volume(image_file, ignore_attr_name_index=True)
             scan_dir(volume.root, volume)
+
+        # Phase 2: extract regular-file data concurrently via processes.
+        # Each worker opens its own image handle and builds an independent
+        # Volume (its own GIL + inode cache); inodes bind to the Volume that
+        # created them, so the index is re-resolved per-worker. File extents
+        # are disjoint and each writes a distinct target path, so no lock is
+        # needed. ThreadPoolExecutor could not parallelize this — EXT4Core is
+        # pure-Python CPU work that holds the GIL; processes bypass that.
+        if file_tasks:
+            self._extract_files_concurrent(file_tasks)
 
         partition_name = self.FileName
         self.fsconfig.insert(0, '/ 0 2000 0755' if partition_name == 'vendor' else '/ 0 0 0755')
@@ -381,6 +381,65 @@ class ULTRAMAN(object):
                 self.contexts.insert(3, f'/{partition_name}/lost+\\found {root_context}')
         self.__appendf('\n'.join(self.contexts), contexts_path)
         return True
+
+    def _extract_files_concurrent(self, file_tasks):
+        total = len(file_tasks)
+        workers = min(8, cpu_count() or 1, total)
+        if workers <= 1:
+            _dump_files(self.OUTPUT_IMAGE_FILE, file_tasks)
+            return
+        # Split evenly; each chunk holds disjoint inode indices whose extents
+        # occupy disjoint disk blocks, so workers seek without contention.
+        chunk_size = (total + workers - 1) // workers
+        chunks = [
+            file_tasks[i:i + chunk_size]
+            for i in range(0, total, chunk_size)
+        ]
+        with ProcessPoolExecutor(max_workers=len(chunks)) as executor:
+            futures = [
+                executor.submit(_dump_files, self.OUTPUT_IMAGE_FILE, chunk)
+                for chunk in chunks
+            ]
+            for future in as_completed(futures):
+                future.result()
+
+# ---------------------------------------------------------------------------
+# Phase-2 concurrent file extraction worker (module-level for pickling)
+# ---------------------------------------------------------------------------
+# Each process opens its own handle on the image and builds an independent
+# Volume: its own GIL, its own inode cache, its own cursor/stream. Inodes
+# bind to the Volume that created them, so the index is re-resolved here
+# rather than reusing phase-1 inode objects. File extents are disjoint and
+# each writes a distinct target path, so no lock is needed.
+def _dump_files(image_path, chunk):
+    from Scripts.Primary.EXT4Core import Volume
+    with open(image_path, 'rb') as stream:
+        volume = Volume(stream, ignore_attr_name_index=True)
+        for inode_idx, target, mode, uid, gid in chunk:
+            inode = volume.inodes[inode_idx]
+            reader = inode.open()
+            try:
+                with open(target, 'xb') as out:
+                    while True:
+                        data = reader.read(1024 * 1024)
+                        if not data:
+                            break
+                        if out.write(data) != len(data):
+                            raise ImageExtractionError(
+                                f'EXT4 文件写入不完整: {target}'
+                            )
+            except OSError as error:
+                raise ImageExtractionError(
+                    f'EXT4 文件写入失败: {target}: {error}'
+                ) from error
+            finally:
+                close_reader = getattr(reader, 'close', None)
+                if close_reader:
+                    close_reader()
+            if os.geteuid() == 0:
+                os.chmod(target, int(mode, 8))
+                os.chown(target, uid, gid)
+
 
 # ---------------------------------------------------------------------------
 # Standalone extraction facade
