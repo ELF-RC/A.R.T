@@ -1,7 +1,7 @@
 """Standalone EXT4 and sparse image extraction.
 
-The parsing core is the vendored Eeems python-ext4 package
-(Scripts/Primary/eeems). This module adds the Android layer on top:
+The parsing core is the vendored python-ext4 package
+(Scripts/Primary/EXT4Core). This module adds the Android layer on top:
 sparse/raw detection, fsconfig/file_contexts collection and image
 extraction.
 """
@@ -14,15 +14,15 @@ import struct
 from pathlib import Path
 
 from Scripts.Primary.WorkSpace import record_global_info
-from Scripts.Primary.eeems import (
+from Scripts.Primary.EXT4Core import (
     Inode,
     Volume,
     InvalidStreamException,
     InodeError,
     ExtendedAttributeError,
 )
-from Scripts.Primary.eeems.enum import EXT4_FT, EXT4_FL
-from Scripts.Primary.eeems.inode import MalformedInodeError, OpenDirectoryError
+from Scripts.Primary.EXT4Core.enum import EXT4_FT, EXT4_FL
+from Scripts.Primary.EXT4Core.inode import MalformedInodeError, OpenDirectoryError
 from Scripts.Primary.ImageTools import sparse_to_raw
 
 
@@ -440,7 +440,7 @@ def _verify_metadata(partition, config_dir):
 def extract_ext4(working_source, partition, destination):
     """Extract an EXT4 image into the supplied destination directory.
 
-    The Eeems parser lives in Scripts/Primary/eeems; this module adds the
+    The python-ext4 parser lives in Scripts/Primary/EXT4Core; this module adds the
     Android layer (sparse detection, fsconfig/contexts collection).
     """
     try:
