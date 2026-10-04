@@ -242,11 +242,12 @@ def _get_ota_parts(zip_path):
 
 
 # Build the avbroot OTA patch command.
-def _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names, disable_avb=False):
+def _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names, disable_avb=False, delete_parts=None):
     """Build common avbroot ota patch command parts.
 
     new_parts: list of (part_name, img_file_name, size_or_None)
     disable_avb: True for [06] (no --key-avb), False for [04] (with --key-avb)
+    delete_parts: list of partition names to remove from the payload
     Returns (cmd, output_name).
     """
     zip_name = zip_path.name
@@ -274,6 +275,10 @@ def _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names, disabl
         cmd.extend(['--key-avb', str(avb_key)])
         if pass_file.is_file():
             cmd.extend(['--pass-avb-file', str(pass_file)])
+
+    # Deleted partitions (removed from the payload update).
+    for part_name in (delete_parts or []):
+        cmd.extend(['--delete-partition', part_name])
 
     # Replaced partitions.
     for part_name, img_name in replace_parts:
@@ -354,12 +359,22 @@ def _patch_ota_disable_avb():
                 if name:
                     super_names.append(name)
 
+    # Ask for partitions to delete from the payload.
+    delete_input = input(f'\n  将要删除的分区名(空格/逗号分开，留空跳过)：').strip()
+    delete_parts = []
+    if delete_input:
+        for name in delete_input.replace('，', ',').replace(',', ' ').split():
+            if name:
+                delete_parts.append(name)
+
     cmd, output_name = _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names,
-                                        disable_avb=True)
+                                        disable_avb=True, delete_parts=delete_parts)
     cmd.extend(['--disable-avb', '--skip-system-ota-cert', '--rootless'])
 
     print(f'\n  输出: {output_name}')
     print(f'  模式: 禁用 AVB 验证')
+    if delete_parts:
+        print(f'  删除: {",".join(delete_parts)}')
     if replace_parts:
         print(f'  替换: {",".join(name for name, _ in replace_parts)}')
     if new_parts:
@@ -443,11 +458,22 @@ def _patch_ota_with_avb():
                 if name:
                     super_names.append(name)
 
-    cmd, output_name = _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names)
+    # Ask for partitions to delete from the payload.
+    delete_input = input(f'\n  将要删除的分区名(空格/逗号分开，留空跳过)：').strip()
+    delete_parts = []
+    if delete_input:
+        for name in delete_input.replace('，', ',').replace(',', ' ').split():
+            if name:
+                delete_parts.append(name)
+
+    cmd, output_name = _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names,
+                                        delete_parts=delete_parts)
     cmd.extend(['--rootless'])
 
     print(f'\n  输出: {output_name}')
     print(f'  模式: 完整 AVB 签名')
+    if delete_parts:
+        print(f'  删除: {",".join(delete_parts)}')
     if replace_parts:
         print(f'  替换: {",".join(name for name, _ in replace_parts)}')
     if new_parts:
