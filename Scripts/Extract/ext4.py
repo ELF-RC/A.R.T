@@ -563,7 +563,6 @@ def extract_ext4(working_source, partition, destination):
         print('Process is releasing the file...')
         ULTRAMAN().MONSTER(working_source, str(output_dir))
         _verify_metadata(partition, config_dir)
-        print('Success !')
         return True
     except (
         ImageExtractionError,
@@ -577,7 +576,6 @@ def extract_ext4(working_source, partition, destination):
         MalformedInodeError,
         OpenDirectoryError,
         MemoryError,
-    ) as error:
-        print('Failed !')
-        print(f'Process log: {error}')
+    ):
+        # decompress_img prints the Success/Failed banner; just signal failure.
         return False
