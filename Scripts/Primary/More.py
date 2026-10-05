@@ -31,11 +31,9 @@ def main():
         elif choice in ('01', '1'):
             from Scripts.ReMake import payload
             payload.main()
-            input('> 任意键继续')
         elif choice in ('02', '2'):
             from Scripts.Primary import VBMetaTools
-            if VBMetaTools.main():
-                input('> 任意键继续')
+            VBMetaTools.main()
         else:
             input(f'> 无效序号: {choice}')
 
