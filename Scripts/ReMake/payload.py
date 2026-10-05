@@ -18,7 +18,8 @@ KEY_FILES = ('avb.key', 'ota.key', 'avb_pkmd.bin', 'ota.crt')
 
 # OTA key management and avbroot command execution.
 def _run_avbroot(args, stdin_data=None):
-    """Run avbroot with given args, optionally pipe stdin_data."""
+    """Run avbroot silently. Returns (ok, log) — caller decides whether to
+    show the log (only on failure, to match the Success!/Failed! style)."""
     avbroot = os.path.join(BIN_PATH, "avbroot")
     result = subprocess.run(
         [avbroot] + args,
@@ -26,11 +27,8 @@ def _run_avbroot(args, stdin_data=None):
         capture_output=True,
         text=True,
     )
-    if result.stdout:
-        print(result.stdout, end='')
-    if result.stderr:
-        print(result.stderr, end='')
-    return result.returncode == 0
+    log = (result.stdout + result.stderr).strip()
+    return result.returncode == 0, log
 
 
 def _write_pass_file(d, passphrase):
@@ -86,12 +84,16 @@ def _selected_zip():
 # Generate or remove OTA signing material.
 def _generate_keys():
     """Generate AVB + OTA signing keys."""
+    os.system('clear')
+    print(f'\n> 生成密钥\n')
     d = _signkey_dir()
     if not d:
         print(f'\n{RED}> 无法获取签名密钥目录{CLOSE}')
+        input('> 按回车继续')
         return
     if _key_status() == 'ok':
         print(f'\n{YELLOW}> 密钥已存在，如需重新生成请先删除旧密钥{CLOSE}')
+        input('> 按回车继续')
         return
 
     d.mkdir(parents=True, exist_ok=True)
@@ -100,51 +102,69 @@ def _generate_keys():
     # Write passphrase.txt first and pass it with --pass-file to avoid interaction.
     pass_file = _write_pass_file(d, passphrase)
 
+    failures = []
     print(f'\n  生成 AVB 密钥...')
-    if not _run_avbroot(
+    ok, log = _run_avbroot(
         ['key', 'generate-key', '-t', 'rsa4096', '-o', str(d / 'avb.key'), '--pass-file', pass_file],
-    ):
-        print(f'  {RED}✗ AVB 密钥生成失败{CLOSE}')
-        return
-    print(f'  {GREEN}✓{CLOSE} avb.key')
+    )
+    if not ok:
+        failures.append(('AVB 密钥', log))
+    else:
+        print(f'  {GREEN}✓{CLOSE} avb.key')
 
     print(f'  生成 OTA 密钥...')
-    if not _run_avbroot(
+    ok, log = _run_avbroot(
         ['key', 'generate-key', '-t', 'rsa4096', '-o', str(d / 'ota.key'), '--pass-file', pass_file],
-    ):
-        print(f'  {RED}✗ OTA 密钥生成失败{CLOSE}')
-        return
-    print(f'  {GREEN}✓{CLOSE} ota.key')
+    )
+    if not ok:
+        failures.append(('OTA 密钥', log))
+    else:
+        print(f'  {GREEN}✓{CLOSE} ota.key')
 
     print(f'  编码 AVB 公钥...')
-    if not _run_avbroot(
+    ok, log = _run_avbroot(
         ['key', 'encode-avb', '-k', str(d / 'avb.key'), '-o', str(d / 'avb_pkmd.bin'), '--pass-file', pass_file],
-    ):
-        print(f'  {RED}✗ AVB 公钥编码失败{CLOSE}')
-        return
-    print(f'  {GREEN}✓{CLOSE} avb_pkmd.bin')
+    )
+    if not ok:
+        failures.append(('AVB 公钥', log))
+    else:
+        print(f'  {GREEN}✓{CLOSE} avb_pkmd.bin')
 
     print(f'  生成 OTA 证书...')
-    if not _run_avbroot(
+    ok, log = _run_avbroot(
         ['key', 'generate-cert', '-k', str(d / 'ota.key'), '-o', str(d / 'ota.crt'), '--pass-file', pass_file],
-    ):
-        print(f'  {RED}✗ OTA 证书生成失败{CLOSE}')
+    )
+    if not ok:
+        failures.append(('OTA 证书', log))
+    else:
+        print(f'  {GREEN}✓{CLOSE} ota.crt')
+
+    if failures:
+        print(f'\n{RED}Failed !{CLOSE}')
+        for name, log in failures:
+            print(f'  {name}:')
+            for line in log.splitlines():
+                print(f'    {line}')
+        input('> 按回车继续')
         return
-    print(f'  {GREEN}✓{CLOSE} ota.crt')
 
     if passphrase:
         print(f'  {GREEN}✓{CLOSE} passphrase.txt（密码已保存）')
     else:
         (d / 'passphrase.txt').unlink(missing_ok=True)
 
-    print(f'\n  {GREEN}> 密钥生成完成！{CLOSE}')
+    print(f'\n{GREEN}Success !{CLOSE}')
+    input('> 按回车继续')
 
 
 def _delete_keys():
     """Delete all key files in sign-key directory."""
+    os.system('clear')
+    print(f'\n> 删除密钥\n')
     d = _signkey_dir()
     if not d or not d.is_dir():
         print(f'\n{YELLOW}> 密钥目录不存在{CLOSE}')
+        input('> 按回车继续')
         return
     deleted = []
     for f in KEY_FILES:
@@ -157,9 +177,11 @@ def _delete_keys():
         pp.unlink()
         deleted.append('passphrase.txt')
     if deleted:
-        print(f'\n  {GREEN}> 已删除：{", ".join(deleted)}{CLOSE}')
+        print(f'  已删除：{", ".join(deleted)}')
+        print(f'\n{GREEN}Success !{CLOSE}')
     else:
         print(f'\n{YELLOW}> 密钥目录为空{CLOSE}')
+    input('> 按回车继续')
 
 
 def _list_zips():
@@ -173,6 +195,8 @@ def _list_zips():
 # Select source OTA and replacement images.
 def _select_ota():
     """Select an OTA zip from stock-zip directory."""
+    os.system('clear')
+    print(f'\n> 选择OTA包\n')
     sf = _select_file()
     if not sf:
         print(f'> {RED}无法获取 stock-zip 目录{CLOSE}')
@@ -298,6 +322,8 @@ def _build_patch_cmd(zip_path, kd, replace_parts, new_parts, super_names, disabl
 # Patch OTA without AVB signing.
 def _patch_ota_disable_avb():
     """Patch OTA with AVB disabled."""
+    os.system('clear')
+    print(f'\n> 修补OTA(禁用AVB)\n')
     # Check prerequisites.
     zip_name = _selected_zip()
     if not zip_name:
@@ -382,13 +408,16 @@ def _patch_ota_disable_avb():
     if super_names:
         print(f'  super逻辑分区: {",".join(super_names)}')
 
-    print(f'\n> 开始修补...')
-    ok = _run_avbroot(cmd)
+    print(f'\nProcessing images signature...')
+    ok, log = _run_avbroot(cmd)
 
     if ok:
-        print(f'\n{GREEN}> 修补完成：{V.layout.ota_work_dir / output_name}{CLOSE}')
+        print(f'\n{GREEN}Success !{CLOSE}')
+        print(f'  输出: {V.layout.ota_work_dir / output_name}')
     else:
-        print(f'\n{RED}> 修补失败{CLOSE}')
+        print(f'\n{RED}Failed !{CLOSE}')
+        for line in log.splitlines():
+            print(f'    {line}')
 
     input('> 按回车继续')
 
@@ -396,6 +425,8 @@ def _patch_ota_disable_avb():
 # Patch OTA and apply AVB signing.
 def _patch_ota_with_avb():
     """Patch OTA with full AVB signing (normal signed OTA)."""
+    os.system('clear')
+    print(f'\n> 修补OTA\n')
     # Check prerequisites.
     zip_name = _selected_zip()
     if not zip_name:
@@ -481,17 +512,20 @@ def _patch_ota_with_avb():
     if super_names:
         print(f'  super逻辑分区: {",".join(super_names)}')
 
-    print(f'\n> 开始修补...')
-    ok = _run_avbroot(cmd)
+    print(f'\nProcessing images signature...')
+    ok, log = _run_avbroot(cmd)
 
     if not ok:
         print(f'\n  首次尝试失败，尝试加 --skip-system-ota-cert 重试...')
-        ok = _run_avbroot(cmd + ['--skip-system-ota-cert'])
+        ok, log = _run_avbroot(cmd + ['--skip-system-ota-cert'])
 
     if ok:
-        print(f'\n{GREEN}> 修补完成：{V.layout.ota_work_dir / output_name}{CLOSE}')
+        print(f'\n{GREEN}Success !{CLOSE}')
+        print(f'  输出: {V.layout.ota_work_dir / output_name}')
     else:
-        print(f'\n{RED}> 修补失败{CLOSE}')
+        print(f'\n{RED}Failed !{CLOSE}')
+        for line in log.splitlines():
+            print(f'    {line}')
 
     input('> 按回车继续')
 
@@ -552,6 +586,8 @@ def _pick_verify_zip():
 # Verify a patched OTA package.
 def _verify_ota():
     """[05] Verify OTA zip signatures with avbroot ota verify."""
+    os.system('clear')
+    print(f'\n> 验证签名\n')
     zip_path = _pick_verify_zip()
     if not zip_path:
         input('> 按回车继续')
@@ -572,7 +608,7 @@ def _verify_ota():
     if has_pkmd:
         cmd.extend(['--public-key-avb', str(pkmd)])
 
-    print(f'\n  验证: {zip_path}')
+    print(f'  验证: {zip_path.name}')
     if has_cert and has_pkmd:
         print('  模式: 核对 ota.crt + avb_pkmd.bin')
     elif has_cert:
@@ -582,12 +618,14 @@ def _verify_ota():
     else:
         print(f'  {YELLOW}模式: 仅检查签名是否有效（未找到密钥）{CLOSE}')
 
-    print(f'\n> 开始验证...')
-    ok = _run_avbroot(cmd)
+    print(f'\nProcessing images signature...')
+    ok, log = _run_avbroot(cmd)
     if ok:
-        print(f'\n{GREEN}> 验证通过{CLOSE}')
+        print(f'\n{GREEN}Success !{CLOSE}')
     else:
-        print(f'\n{RED}> 验证失败{CLOSE}')
+        print(f'\n{RED}Failed !{CLOSE}')
+        for line in log.splitlines():
+            print(f'    {line}')
     input('> 按回车继续')
 
 
