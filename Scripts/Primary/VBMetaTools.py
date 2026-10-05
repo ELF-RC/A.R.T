@@ -454,7 +454,7 @@ def main():
         print()
         print(f'  {GREEN}[01]{CLOSE}\t生成密钥 (必须)')
         print()
-        print(f'  {YELLOW}[02]{CLOSE}\t解析镜像签名信息')
+        print(f'  {CYAN}[02]{CLOSE}\t解析镜像签名信息')
         print()
         print(f'  {GREEN}[03]{CLOSE}\t添加哈希签名 (小分区)')
         print()
@@ -464,7 +464,7 @@ def main():
         print()
         print(f'  {CYAN}[06]{CLOSE}\t验证镜像签名')
         print()
-        print(f'  {CYAN}[07]{CLOSE}\t去除镜像签名')
+        print(f'  {RED}[07]{CLOSE}\t去除镜像签名')
         print()
 
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
