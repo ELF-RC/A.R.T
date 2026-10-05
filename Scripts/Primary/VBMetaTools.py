@@ -125,147 +125,195 @@ def _trim_trailing_zeros(img):
         return 0
 
 
-def _sign_footer(cmd_name, img, trim_zeros=True, algorithm='SHA256_RSA4096', need_key=True):
-    """Common logic for add_hash_footer and add_hashtree_footer.
+def _ask_props():
+    """Collect AVB properties: one 'key value' per line, empty line to finish."""
+    props = []
+    print('\n  ─────────────  Prop（可选）  ─────────────')
+    print('  每行格式: key value（空格分隔，留空结束）\n')
+    while True:
+        line = input('  >> ').strip()
+        if not line:
+            break
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            print(f'  {RED}格式错误，应为 key value{CLOSE}')
+            continue
+        props.append((parts[0], parts[1].strip()))
+    if props:
+        print(f'\n  共 {len(props)} 条 Prop:')
+        for k, v in props:
+            print(f'    • {k} = {v}')
+    else:
+        print('  （无 Prop）')
+    print('  ─────────────────────────────────────────')
+    return props
 
-    algorithm: avbtool --algorithm value. 'NONE' produces an unencrypted
-    hashtree footer (no public key) so that tools such as avbroot treat the
-    partition as unsigned and copy its hashtree into the parent vbmeta.
-    need_key: whether the signing flow requires avb.key.
-    """
+
+# Phase 1: collect partition name, size, props, rollback for one image.
+def _collect_sign_spec(img, idx, total, ask_rollback):
+    """Prompt for one image's signing parameters without side effects."""
+    print(f'\n────────────────────────────────────')
+    print(f'当前镜像 ({idx}/{total}) : {os.path.basename(img)}')
+    print('────────────────────────────────────')
+    part_name = input('\n  分区名（留空用文件名）>> ').strip() or os.path.splitext(os.path.basename(img))[0]
+    size_input = input('  分区大小（字节），留空自动计算 >> ').strip()
+    rollback = None
+    if ask_rollback:
+        rollback = input('  回滚索引（默认0）>> ').strip() or '0'
+    props = _ask_props()
+    return {
+        'img': img,
+        'part_name': part_name,
+        'size_input': size_input,
+        'props': props,
+        'rollback': rollback,
+    }
+
+
+# Phase 2: copy, trim, decrypt key, resolve size, run avbtool silently.
+def _process_sign_spec(spec, cmd_name, algorithm, need_key, trim_zeros):
+    """Run avbtool on one spec with captured output. Returns (ok, log_or_path)."""
+    img = spec['img']
+    part_name = spec['part_name']
+
     if need_key:
         key_path = _avb_key_path()
         if not key_path:
-            print(f'\n{RED}> 未找到 avb.key，请先生成密钥{CLOSE}')
-            input('> 按回车继续')
-            return
+            return False, '未找到 avb.key，请先生成密钥'
     else:
         key_path = None
 
-    # Copy the original to x_signed.img and operate on the copy.
     base, ext = os.path.splitext(img)
     out_img = f'{base}_signed{ext}'
-    shutil.copy2(img, out_img)
+    try:
+        shutil.copy2(img, out_img)
+    except OSError as error:
+        return False, f'复制镜像失败: {error}'
 
-    orig_size = os.path.getsize(out_img)
+    img_size = os.path.getsize(out_img)
     if trim_zeros:
-        trimmed_size = _trim_trailing_zeros(out_img)
-        if trimmed_size == 0:
-            print(f'\n{RED}> 镜像文件全为零，无法签名{CLOSE}')
+        trimmed = _trim_trailing_zeros(out_img)
+        if trimmed == 0:
             os.remove(out_img)
-            input('> 按回车继续')
-            return
+            return False, '镜像文件全为零，无法签名'
         img_size = os.path.getsize(out_img)
-        print(f'\n  {orig_size} bytes → {img_size}')
-    else:
-        img_size = orig_size
 
-    # Show which image is being signed (matters when processing several in a row).
-    # Partition name: use the user input, or the filename without .img when empty.
-    print(f'\n  当前镜像: {os.path.basename(img)}')
-    part_name = input('\n  分区名（留空用文件名）>> ').strip() or os.path.splitext(os.path.basename(img))[0]
-
-    # NONE algorithm needs no signing key.
     unenc_key = None
     unenc_cleanup = None
     if algorithm != 'NONE':
         pass_path = _pass_file_path()
-        # avbtool has no passphrase option: decrypt the key first when needed.
         unenc_key, unenc_cleanup = _unencrypted_key_path(pass_path)
         if pass_path and not unenc_key:
-            input('> 按回车继续')
-            return
+            if os.path.isfile(out_img):
+                os.remove(out_img)
+            return False, '解密 avb.key 失败'
         key_path = unenc_key or key_path
 
-    # Build the per-call argument fragments used for the calc_max probes.
     key_args = [] if algorithm == 'NONE' else ['--key', key_path]
     alg_args = ['--algorithm', algorithm] + key_args
-    # partition_size: use the user value, or calculate it automatically.
-    ps_input = input('  分区大小（字节），留空自动计算 >> ').strip()
+
     import math
-    if ps_input:
-        v = int(ps_input)
+    size_input = spec['size_input']
+    if size_input:
+        v = int(size_input)
         aligned_ps = str(v) if v % 4096 == 0 else str((v + 4095) // 4096 * 4096)
     elif cmd_name == 'add_hashtree_footer':
-        # Estimate using the --calc_max_image_size ratio.
         trial_ps = (img_size + 64 * 1024 * 1024 + 4095) // 4096 * 4096
         r = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
-            '--hash_algorithm', 'sha256'] +
-            alg_args +
-            ['--partition_size', str(trial_ps),
-             '--calc_max_image_size'],
+            '--hash_algorithm', 'sha256'] + alg_args +
+            ['--partition_size', str(trial_ps), '--calc_max_image_size'],
             capture_output=True, text=True)
         max_img = int(r.stdout.strip()) if r.stdout.strip().isdigit() else 0
-        aligned_ps = str(math.ceil(img_size / max_img * trial_ps / 4096) * 4096)
+        aligned_ps = str(math.ceil(img_size / max_img * trial_ps / 4096) * 4096) if max_img else str(trial_ps)
         r2 = subprocess.run([AVBTOOL, 'add_hashtree_footer',
             '--image', out_img, '--partition_name', part_name,
-            '--hash_algorithm', 'sha256'] +
-            alg_args +
-            ['--partition_size', aligned_ps,
-             '--calc_max_image_size'],
+            '--hash_algorithm', 'sha256'] + alg_args +
+            ['--partition_size', aligned_ps, '--calc_max_image_size'],
             capture_output=True, text=True)
         max_img2 = int(r2.stdout.strip()) if r2.stdout.strip().isdigit() else 0
-        if max_img2 < img_size:
+        if max_img2 and max_img2 < img_size:
             aligned_ps = str(math.ceil(img_size / max_img2 * int(aligned_ps) / 4096) * 4096)
     else:
         aligned_ps = str((img_size + 69632 + 4095) // 4096 * 4096)
 
-    # Build the argument list.
     args = [cmd_name, '--image', out_img, '--partition_name', part_name,
-            '--hash_algorithm', 'sha256'] + alg_args + \
-           ['--partition_size', aligned_ps]
-    # rollback_index: prompt for hash footer; omit it for hashtree footer.
-    if cmd_name == 'add_hash_footer':
-        rollback = input('  回滚索引（默认0）>> ').strip() or '0'
-        args.extend(['--rollback_index', rollback])
+            '--hash_algorithm', 'sha256'] + alg_args + ['--partition_size', aligned_ps]
+    for k, v in spec['props']:
+        args.extend(['--prop', f'{k}:{v}'])
+    if cmd_name == 'add_hash_footer' and spec.get('rollback') is not None:
+        args.extend(['--rollback_index', spec['rollback']])
 
-    print(f'  输出: {out_img}')
-    ok = _run(args)
-    # Remove the temporary plaintext key regardless of the signing result.
+    result = subprocess.run([AVBTOOL] + args, capture_output=True, text=True)
+    log = (result.stdout + result.stderr).strip()
+
     if unenc_cleanup:
         try:
             os.remove(unenc_cleanup)
         except OSError:
             pass
-    if ok:
-        print('\n  Patch has been completed.')
-    else:
-        print(f'\n  {RED}> 失败{CLOSE}')
+
+    if result.returncode == 0:
+        return True, out_img
+    if os.path.isfile(out_img):
         os.remove(out_img)
+    return False, log
+
+
+# Two-phase batch signer: collect all specs, then process silently.
+def _sign_batch(cmd_name, title, algorithm, need_key, trim_zeros, ask_rollback):
+    """Clear screen, collect signing specs for all images, then process them
+    silently with avbtool. Shows green Success ! or red Failed ! + Process log."""
+    os.system('clear')
+    print(f'\n> {title}\n')
+    imgs = _select_files('选择要签名的镜像')
+    if not imgs:
+        input('> 按回车继续')
+        return
+
+    # Phase 1: collect requirements for every image up front (no babysitting).
+    specs = []
+    for idx, img in enumerate(imgs, 1):
+        specs.append(_collect_sign_spec(img, idx, len(imgs), ask_rollback))
+        if idx < len(imgs):
+            print('\n  NEXT ONE')
+
+    # Phase 2: process all images silently; capture avbtool output per image.
+    print('\nProcessing images signature...')
+    failures = []
+    for spec in specs:
+        ok, log = _process_sign_spec(spec, cmd_name, algorithm, need_key, trim_zeros)
+        if not ok:
+            failures.append((os.path.basename(spec['img']), log))
+
+    if failures:
+        print(f'\n{RED}Failed !{CLOSE}')
+        for name, log in failures:
+            print(f'  {name}:')
+            for line in log.splitlines():
+                print(f'    {line}')
+    else:
+        print(f'\n{GREEN}Success !{CLOSE}')
     input('> 按回车继续')
 
 
 def cmd_add_hash_footer():
     """[02] Add a hash footer to small partitions such as boot, recovery, and dtbo"""
-    imgs = _select_files('选择要签名的镜像')
-    if not imgs:
-        input('> 按回车继续')
-        return
-    for img in imgs:
-        _sign_footer('add_hash_footer', img, trim_zeros=True)
+    _sign_batch('add_hash_footer', '添加哈希签名 (小分区)',
+                'SHA256_RSA4096', need_key=True, trim_zeros=True, ask_rollback=True)
 
 
 def cmd_add_hashtree_footer():
     """[03] Add a hashtree footer to large partitions such as system and vendor"""
-    imgs = _select_files('选择要签名的镜像')
-    if not imgs:
-        input('> 按回车继续')
-        return
-    for img in imgs:
-        _sign_footer('add_hashtree_footer', img, trim_zeros=False)
+    _sign_batch('add_hashtree_footer', '添加哈希树签名 (大分区)',
+                'SHA256_RSA4096', need_key=True, trim_zeros=False, ask_rollback=False)
 
 
 def cmd_add_hashtree_footer_plain():
-    """[06] Add an unencrypted hashtree footer (NONE) so avbroot treats the
+    """[04] Add an unencrypted hashtree footer (NONE) so avbroot treats the
     partition as unsigned and copies its hashtree into the parent vbmeta."""
-    imgs = _select_files('选择要签名的镜像（不加密）')
-    if not imgs:
-        input('> 按回车继续')
-        return
-    for img in imgs:
-        _sign_footer('add_hashtree_footer', img, trim_zeros=False,
-                     algorithm='NONE', need_key=False)
+    _sign_batch('add_hashtree_footer', '添加哈希树签名 (不加密)',
+                'NONE', need_key=False, trim_zeros=False, ask_rollback=False)
 
 
 def cmd_verify_image():
