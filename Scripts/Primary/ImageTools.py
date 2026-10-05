@@ -304,11 +304,11 @@ _FILE_SIGNATURES = (
     [b'\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\x03', "zopfli"],
     [b'\xfd7zXZ', 'xz'],
     [b']\x00\x00\x00\x04\xff\xff\xff\xff\xff\xff\xff\xff', 'lzma'],
-    [b'\x02!L\x18', 'lz4_lg'],
+    [b'\x89\x4c\x5a\x4f', 'lzop'],
     [b'\x89PNG', 'png'], [b"LOGO!!!!", 'logo'],
     [b'\x67\x44\x6c\x61', 'super', 4096],
     [b'\x10\x20\xF5\xF2', 'f2fs', 1024],
-    [b'\x28\xb5\x2f\xfd', 'zstd'],
+    [b'\x28\xb5\x2f\xfd', 'zst'],
 )
 
 
