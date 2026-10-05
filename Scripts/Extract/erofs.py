@@ -105,10 +105,8 @@ def extract_erofs(working_source, partition, destination):
             capture=True,
         )
         if result != 0:
-            print('Failed !')
-            print(f'Process log: {result}')
+            # decompress_img prints the Success/Failed banner; just signal failure.
             return False
-        print('Success !')
         if not _normalize_erofs_metadata(partition, config_dir):
             return False
         return _commit_extracted_partition(
