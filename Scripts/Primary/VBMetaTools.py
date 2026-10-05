@@ -35,6 +35,39 @@ def _signkey_dir():
     return V.layout.ota_signkey_dir if V.layout else None
 
 
+KEY_FILES = ('avb.key', 'ota.key', 'avb_pkmd.bin', 'ota.crt')
+
+
+def _key_status():
+    """Return key status: 'ok', 'damaged', or 'missing'."""
+    d = _signkey_dir()
+    if not d:
+        return 'missing'
+    existing = [(d / f).is_file() for f in KEY_FILES]
+    if all(existing):
+        return 'ok'
+    if any(existing):
+        return 'damaged'
+    return 'missing'
+
+
+def _show_key_status():
+    """Print current key-file status below the menu title."""
+    ks = _key_status()
+    if ks == 'ok':
+        print(f'  密钥文件状态：{GREEN}已生成{CLOSE}')
+    elif ks == 'damaged':
+        print(f'  密钥文件状态：{YELLOW}已损坏{CLOSE}')
+    else:
+        print(f'  密钥文件状态：{RED}未生成{CLOSE}')
+
+
+def _generate_keys():
+    """Generate AVB + OTA signing keys via avbroot (same flow as payload.py)."""
+    from Scripts.ReMake.payload import _generate_keys as _do_gen
+    _do_gen()
+
+
 def _avb_key_path():
     d = _signkey_dir()
     if not d or not d.is_dir():
@@ -412,45 +445,45 @@ def main():
         input('> 按回车继续')
         return
 
-    actions = {
-        '01': cmd_info_image,
-        '02': cmd_add_hash_footer,
-        '03': cmd_add_hashtree_footer,
-        '04': cmd_add_hashtree_footer_plain,
-        '05': cmd_verify_image,
-        '06': cmd_erase_footer,
-        '1': cmd_info_image,
-        '2': cmd_add_hash_footer,
-        '3': cmd_add_hashtree_footer,
-        '4': cmd_add_hashtree_footer_plain,
-        '5': cmd_verify_image,
-        '6': cmd_erase_footer,
-    }
-
     while True:
         os.system("clear")
         print(f'\n{BOLD}> 镜像签名与VBMeta工具{CLOSE}\n')
+        _show_key_status()
+        print()
         print(f'  {YELLOW}[00]{CLOSE}\t返回上级菜单')
         print()
-        print(f'  {YELLOW}[01]{CLOSE}\t解析镜像签名信息')
+        print(f'  {GREEN}[01]{CLOSE}\t生成密钥 (必须)')
         print()
-        print(f'  {GREEN}[02]{CLOSE}\t添加哈希签名 (小分区)')
+        print(f'  {YELLOW}[02]{CLOSE}\t解析镜像签名信息')
         print()
-        print(f'  {GREEN}[03]{CLOSE}\t添加哈希树签名 (大分区)')
+        print(f'  {GREEN}[03]{CLOSE}\t添加哈希签名 (小分区)')
         print()
-        print(f'  {GREEN}[04]{CLOSE}\t添加哈希树签名 (不加密)')
+        print(f'  {GREEN}[04]{CLOSE}\t添加哈希树签名 (大分区)')
         print()
-        print(f'  {CYAN}[05]{CLOSE}\t验证镜像签名')
+        print(f'  {GREEN}[05]{CLOSE}\t添加哈希树签名 (不加密)')
         print()
-        print(f'  {CYAN}[06]{CLOSE}\t去除镜像签名')
+        print(f'  {CYAN}[06]{CLOSE}\t验证镜像签名')
+        print()
+        print(f'  {CYAN}[07]{CLOSE}\t去除镜像签名')
         print()
 
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
-        if choice == '00' or choice == '0':
-            return False
-        elif choice in actions:
-            actions[choice]()
-            return True
+        if choice in ('00', '0'):
+            return
+        elif choice in ('01', '1'):
+            _generate_keys()
+        elif choice in ('02', '2'):
+            cmd_info_image()
+        elif choice in ('03', '3'):
+            cmd_add_hash_footer()
+        elif choice in ('04', '4'):
+            cmd_add_hashtree_footer()
+        elif choice in ('05', '5'):
+            cmd_add_hashtree_footer_plain()
+        elif choice in ('06', '6'):
+            cmd_verify_image()
+        elif choice in ('07', '7'):
+            cmd_erase_footer()
         else:
             input(f'> 无效序号: {choice}')
 
