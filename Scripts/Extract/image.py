@@ -36,8 +36,6 @@ def decompress_img(source, distance=None, keep=1):
     if source_type not in ('boot', 'vendor_boot', 'sparse', 'ext', 'erofs', 'super'):
         print(f'> 不支持的镜像类型: {source_type}')
         return
-    if os.path.basename(source) in ('dsp.img', 'exaid.img', 'cust.img'):
-        return
 
     try:
         working_source = _stage_work_source(source, 'image')
@@ -111,12 +109,7 @@ def decompress(infile, flag=4):
         return
 
     # flag 4 (img)
-    valid_imgs = [
-        part for part in sorted(infile)
-        if os.path.isfile(part)
-        and os.path.basename(part) not in ('dsp.img', 'cust.img')
-        and get_file_type(part) in ('ext', 'sparse', 'erofs', 'super', 'boot', 'vendor_boot')
-    ]
+    valid_imgs = [part for part in sorted(infile) if os.path.isfile(part)]
 
     # Single image: show a dedicated confirmation screen.
     if len(valid_imgs) == 1:
