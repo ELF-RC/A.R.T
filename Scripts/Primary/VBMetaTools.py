@@ -93,14 +93,26 @@ def _select_files(prompt="选择文件"):
 # Interactive AVB and VBMeta operations.
 def cmd_info_image():
     """[01] Show image information"""
+    os.system('clear')
+    print('\n> 解析镜像签名信息\n')
     imgs = _select_files('选择要查看的镜像')
     if not imgs:
         input('> 按回车继续')
         return
-    for img in imgs:
-        print(f'\n  查看: {img}')
-        _run(['info_image', '--image', img])
-    input('> 按回车继续')
+
+    for idx, img in enumerate(imgs, 1):
+        print(f'\n────────────────────────────────────')
+        print(f'  镜像 ({idx}/{len(imgs)}): {os.path.basename(img)}')
+        print('────────────────────────────────────')
+        result = subprocess.run(
+            [AVBTOOL, 'info_image', '--image', img],
+            capture_output=True, text=True,
+        )
+        if result.stdout:
+            print(result.stdout, end='')
+        if result.stderr:
+            print(result.stderr, end='')
+    input('\n> 按回车继续')
 
 
 def _trim_trailing_zeros(img):
@@ -318,47 +330,79 @@ def cmd_add_hashtree_footer_plain():
 
 def cmd_verify_image():
     """[04] Verify the image signature"""
+    os.system('clear')
+    print('\n> 验证镜像签名\n')
     imgs = _select_files('选择要验证的镜像')
     if not imgs:
         input('> 按回车继续')
         return
 
+    print('\nProcessing images signature...')
+    failures = []
     for img in imgs:
-        print(f'\n  验证: {img}')
         # Omit --key so avbtool extracts the public key from the image.
         result = subprocess.run(
             [AVBTOOL, 'verify_image', '--image', img],
             capture_output=True, text=True,
         )
         output = result.stdout + result.stderr
-        if 'Successfully verified' in output:
-            print(f'  {GREEN}验证通过。{CLOSE}')
-        else:
-            print(f'  {RED}验证失败{CLOSE}')
-            print(output, end='')
-    input('> 按回车继续')
+        if 'Successfully verified' not in output:
+            failures.append((os.path.basename(img), output.strip()))
+
+    if failures:
+        print(f'\n{RED}Failed !{CLOSE}')
+        for name, log in failures:
+            print(f'  {name}:')
+            for line in log.splitlines():
+                print(f'    {line}')
+    else:
+        print(f'\n{GREEN}Success !{CLOSE}')
+    input('\n> 按回车继续')
 
 
 def cmd_erase_footer():
     """[05] Remove the image AVB footer"""
+    os.system('clear')
+    print('\n> 去除镜像签名\n')
     imgs = _select_files('选择要去除签名的镜像')
     if not imgs:
         input('> 按回车继续')
         return
 
+    print('\nProcessing images signature...')
+    outputs = []
+    failures = []
     for img in imgs:
         base, ext = os.path.splitext(img)
         out_img = f'{base}_unsign{ext}'
-        shutil.copy2(img, out_img)
-
-        print(f'\n  去除签名: {img}')
-        ok = _run(['erase_footer', '--image', out_img])
-        if ok:
-            print(f'  {GREEN}Patch has been completed.{CLOSE}')
+        try:
+            shutil.copy2(img, out_img)
+        except OSError as error:
+            failures.append((os.path.basename(img), f'复制镜像失败: {error}'))
+            continue
+        result = subprocess.run(
+            [AVBTOOL, 'erase_footer', '--image', out_img],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            outputs.append(out_img)
         else:
-            print(f'  {RED}> 失败{CLOSE}')
-            os.remove(out_img)
-    input('> 按回车继续')
+            if os.path.isfile(out_img):
+                os.remove(out_img)
+            failures.append((os.path.basename(img), (result.stdout + result.stderr).strip()))
+
+    if outputs:
+        for out_img in outputs:
+            print(f'  输出: {out_img}')
+    if failures:
+        print(f'\n{RED}Failed !{CLOSE}')
+        for name, log in failures:
+            print(f'  {name}:')
+            for line in log.splitlines():
+                print(f'    {line}')
+    else:
+        print(f'\n{GREEN}Success !{CLOSE}')
+    input('\n> 按回车继续')
 
 
 # AVB submenu dispatcher.
