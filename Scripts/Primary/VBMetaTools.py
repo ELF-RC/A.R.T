@@ -447,9 +447,10 @@ def main():
 
         choice = input(f'> {RED}输入序号{CLOSE} >> ').strip()
         if choice == '00' or choice == '0':
-            return
+            return False
         elif choice in actions:
             actions[choice]()
+            return True
         else:
             input(f'> 无效序号: {choice}')
 

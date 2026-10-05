@@ -34,8 +34,8 @@ def main():
             input('> 任意键继续')
         elif choice in ('02', '2'):
             from Scripts.Primary import VBMetaTools
-            VBMetaTools.main()
-            input('> 任意键继续')
+            if VBMetaTools.main():
+                input('> 任意键继续')
         else:
             input(f'> 无效序号: {choice}')
 
