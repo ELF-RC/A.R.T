@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 
-from Scripts.Primary.Utils import V, call
+from Scripts.Primary.Utils import V, call, failure_log, surface_warnings
 from Scripts.Primary.WorkSpace import record_global_info
 
 
@@ -100,13 +100,16 @@ def extract_erofs(working_source, partition, destination):
             config_dir, partition,
             {'size': source.stat().st_size, 'type': 'erofs', 'label': partition},
         )
-        result = call(
+        exit_code, log = call(
             ['extract.erofs', '-i', str(source), '-o', str(workspace), '-x'],
             capture=True,
         )
-        if result != 0:
-            # decompress_img prints the Success/Failed banner; just signal failure.
+        if exit_code != 0:
+            # decompress_img prints the Success/Failed banner, so only the tool
+            # log goes here — dropping it left the failure with no diagnosis.
+            print(f'Process log: {failure_log(log, exit_code)}')
             return False
+        surface_warnings(log, 'extract.erofs')
         if not _normalize_erofs_metadata(partition, config_dir):
             return False
         return _commit_extracted_partition(

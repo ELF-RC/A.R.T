@@ -114,9 +114,15 @@ def init_bin_path():
 def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None, capture=False):
     """Run a command with MIO-compatible argv handling and no implicit shell.
 
-    capture=True keeps the process output in memory instead of printing it;
-    on non-zero exit the output (or a launch error) is returned so the caller
-    can show a log without it having leaked to the terminal.
+    capture=True buffers the process output in memory instead of printing it,
+    and returns a ``(exit_code, log)`` pair — on success *and* on failure — so
+    the caller always keeps the log and decides whether to show it. Returning
+    the log only on non-zero exit (the previous behaviour) makes success-time
+    warnings unrecoverable, which matters because e2fsdroid and friends exit 0
+    after complaining.
+
+    capture=False keeps the historical contract: output streams to the
+    terminal and the bare exit code is returned.
     """
     del sp
     if isinstance(exe, (list, tuple)):
@@ -142,7 +148,7 @@ def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None, capture=False):
     except OSError as error:
         message = f'> 启动命令失败: {error}'
         if capture:
-            return message
+            return 127, message
         print(message)
         return 127
 
@@ -154,9 +160,49 @@ def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None, capture=False):
             if not capture and out == 0:
                 print(line.strip())
     exit_code = process.wait()
-    if capture and exit_code != 0:
-        return '\n'.join(line for line in lines if line.strip()) or f'退出码: {exit_code}'
+    if capture:
+        return exit_code, '\n'.join(line for line in lines if line.strip())
     return exit_code
+
+
+# Substrings that mark a line worth showing even when the tool exited 0.
+_WARNING_MARKERS = (
+    'warn', 'error', 'cannot', "can't", 'failed', 'failure',
+    'not found', 'no such', 'unable', 'invalid', 'denied',
+    'missing', 'skip', 'ignored',
+)
+
+
+def failure_log(log, exit_code):
+    """Normalize a captured log for display, covering the empty-output case."""
+    return log or f'(无输出，退出码 {exit_code})'
+
+
+def surface_warnings(log, tool=''):
+    """Print warning-looking lines from an otherwise successful run.
+
+    Packagers report recoverable problems on stdout and still exit 0 — an
+    fs_config or SELinux label that matched nothing, a skipped special file —
+    so the image comes out subtly wrong with no visible failure. Surfacing
+    only the marker lines keeps the Success!/Failed! style quiet in the normal
+    case without dropping those.
+
+    Returns True when something was printed.
+    """
+    if not log:
+        return False
+    hits = [
+        line.strip() for line in log.splitlines()
+        if line.strip()
+        and any(marker in line.lower() for marker in _WARNING_MARKERS)
+    ]
+    if not hits:
+        return False
+    label = f' ({tool})' if tool else ''
+    print(f'\n{YELLOW}工具输出提示{label}:{CLOSE}')
+    for line in hits:
+        print(f'  {line}')
+    return True
 
 
 

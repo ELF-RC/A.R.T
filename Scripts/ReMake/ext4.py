@@ -9,9 +9,12 @@ from Scripts.Primary.Utils import (
     GREEN,
     RED,
     V,
+    YELLOW,
     call,
     ceil,
+    failure_log,
     get_dir_size,
+    surface_warnings,
 )
 from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, translate_contexts_to_ascii
 from Scripts.Primary.WorkSpace import load_image_json
@@ -224,52 +227,60 @@ def _write_image(state, fsconfig, contexts, source, flag):
     e2fsdroid_cmd.append(new_distance)
 
     print('Process remaking the file system...', end='', flush=True)
-    mkfs_log = call(mke2fs_cmd, capture=True)
-    fs_created = os.path.isfile(new_distance)
-    if isinstance(mkfs_log, str):
+    mkfs_code, mkfs_log = call(mke2fs_cmd, capture=True)
+    if mkfs_code != 0:
         try:
             os.remove(new_distance)
         except (OSError, FileNotFoundError):
             pass
         print(f'\n{RED}Failed !{CLOSE}')
-        print(f'Process log: {mkfs_log}')
+        print(f'Process log: {failure_log(mkfs_log, mkfs_code)}')
         return False
-    if fs_created:
-        e2fs_result = call(e2fsdroid_cmd, capture=True)
-        if isinstance(e2fs_result, str):
-            # e2fsdroid returned an error log: drop the half-packed image.
-            try:
-                os.remove(new_distance)
-            except (OSError, FileNotFoundError):
-                pass
-            print(f'\n{RED}Failed !{CLOSE}')
-            print(f'Process log: {e2fs_result}')
-            return False
-        elif e2fs_result != 0:
-            try:
-                os.remove(new_distance)
-            except (OSError, FileNotFoundError):
-                pass
-            print(f'\n{RED}Failed !{CLOSE}')
-            print(f'Process log: 退出码 {e2fs_result}')
-            return False
-        if not os.path.isfile(new_distance):
-            print(f'\n{RED}Failed !{CLOSE}')
+    if not os.path.isfile(new_distance):
+        print(f'\n{RED}Failed !{CLOSE}')
+        print('Process log: mke2fs 未生成目标镜像')
+        return False
+
+    e2fs_code, e2fs_log = call(e2fsdroid_cmd, capture=True)
+    if e2fs_code != 0 or not os.path.isfile(new_distance):
+        # e2fsdroid failed, or produced nothing: drop the half-packed image.
+        try:
+            os.remove(new_distance)
+        except (OSError, FileNotFoundError):
+            pass
+        print(f'\n{RED}Failed !{CLOSE}')
+        if e2fs_code != 0:
+            print(f'Process log: {failure_log(e2fs_log, e2fs_code)}')
+        else:
             print('Process log: e2fsdroid 未生成目标镜像')
-            return False
+        return False
 
     print(f'\n{GREEN}Success !{CLOSE}')
+    # A clean exit is not a clean run: e2fsdroid reports unmatched fs_config
+    # entries and SELinux labels on stdout and still exits 0, leaving the image
+    # subtly wrong with no visible failure. Surface those.
+    surface_warnings(mkfs_log, 'mke2fs')
+    surface_warnings(e2fs_log, 'e2fsdroid')
     # RESIZE_IMG=1: shrink the image to its minimum footprint (resize2fs -M),
     # matching DNA's "压缩EXT4镜像空间" behaviour. The image is already valid
     # at this point, so a resize2fs failure is warned, not fatal.
     if V.SETUP_MANIFEST["RESIZE_IMG"] == "1":
-        result = call(["resize2fs", "-M", new_distance], capture=True)
-        if isinstance(result, str):
-            print(f'\n{YELLOW}resize2fs 警告:{CLOSE} {result}')
+        resize_code, resize_log = call(
+            ["resize2fs", "-M", new_distance], capture=True)
+        if resize_code != 0:
+            print(f'\n{YELLOW}resize2fs 警告:{CLOSE} '
+                  f'{failure_log(resize_log, resize_code)}')
+        else:
+            surface_warnings(resize_log, 'resize2fs')
     if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" or flag > 9:
         print("开始转换: sparse format ...")
-        if call(["img2simg", new_distance, distance]) != 0:
+        sparse_code, sparse_log = call(
+            ["img2simg", new_distance, distance], capture=True)
+        if sparse_code != 0:
+            print(f'{RED}Failed !{CLOSE}')
+            print(f'Process log: {failure_log(sparse_log, sparse_code)}')
             return False
+        surface_warnings(sparse_log, 'img2simg')
         try:
             os.remove(new_distance)
         except OSError:

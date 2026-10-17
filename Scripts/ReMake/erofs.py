@@ -10,7 +10,9 @@ from Scripts.Primary.Utils import (
     RED,
     V,
     call,
+    failure_log,
     get_dir_size,
+    surface_warnings,
 )
 from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, translate_contexts_to_ascii
 from Scripts.Primary.WorkSpace import load_image_json
@@ -105,23 +107,33 @@ def _write_image(state, fsconfig, contexts, source, flag):
     )
 
     print('Process remaking the file system...', end='', flush=True)
-    result = call(mkerofs_cmd, capture=True)
-    if result != 0:
+    exit_code, log = call(mkerofs_cmd, capture=True)
+    if exit_code != 0:
         try:
             os.remove(new_distance)
         except OSError:
             pass
         print(f'\n{RED}Failed !{CLOSE}')
-        print(f'Process log: {result}')
+        print(f'Process log: {failure_log(log, exit_code)}')
+        return False
+    # Check the artifact before declaring success: a zero exit with no image
+    # used to print Success! and then fail silently in the caller.
+    if not os.path.isfile(new_distance):
+        print(f'\n{RED}Failed !{CLOSE}')
+        print('Process log: mkfs.erofs 未生成目标镜像')
         return False
     print(f'\n{GREEN}Success !{CLOSE}')
-    if not os.path.isfile(new_distance):
-        return False
+    surface_warnings(log, 'mkfs.erofs')
 
     if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" or flag > 9:
         print("开始转换: sparse format ...")
-        if call(["img2simg", new_distance, distance]) != 0:
+        sparse_code, sparse_log = call(
+            ["img2simg", new_distance, distance], capture=True)
+        if sparse_code != 0:
+            print(f'{RED}Failed !{CLOSE}')
+            print(f'Process log: {failure_log(sparse_log, sparse_code)}')
             return False
+        surface_warnings(sparse_log, 'img2simg')
         try:
             os.remove(new_distance)
         except OSError:
