@@ -14,6 +14,7 @@ from Scripts.Primary.Utils import (
     ceil,
     failure_log,
     get_dir_size,
+    missing_artifact_log,
     surface_warnings,
 )
 from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, translate_contexts_to_ascii
@@ -238,7 +239,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
         return False
     if not os.path.isfile(new_distance):
         print(f'\n{RED}Failed !{CLOSE}')
-        print('Process log: mke2fs 未生成目标镜像')
+        print(f'Process log: {missing_artifact_log("mke2fs", mkfs_log)}')
         return False
 
     e2fs_code, e2fs_log = call(e2fsdroid_cmd, capture=True)
@@ -252,7 +253,8 @@ def _write_image(state, fsconfig, contexts, source, flag):
         if e2fs_code != 0:
             print(f'Process log: {failure_log(e2fs_log, e2fs_code)}')
         else:
-            print('Process log: e2fsdroid 未生成目标镜像')
+            # Exit 0 with no artifact: the reason is still in the tool output.
+            print(f'Process log: {missing_artifact_log("e2fsdroid", e2fs_log)}')
         return False
 
     print(f'\n{GREEN}Success !{CLOSE}')

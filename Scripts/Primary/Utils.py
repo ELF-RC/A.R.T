@@ -178,6 +178,18 @@ def failure_log(log, exit_code):
     return log or f'(无输出，退出码 {exit_code})'
 
 
+def missing_artifact_log(tool, log):
+    """Build a Process log line for a tool that exited 0 but produced nothing.
+
+    The exit code carries no information here — it is always 0, since a
+    non-zero exit is handled by the caller's earlier branch — so reporting it
+    reads like the success case. Only a non-empty log is appended.
+    """
+    base = f'{tool} 未生成目标镜像'
+    log = (log or '').strip()
+    return f'{base}\n{log}' if log else base
+
+
 def surface_warnings(log, tool=''):
     """Print warning-looking lines from an otherwise successful run.
 

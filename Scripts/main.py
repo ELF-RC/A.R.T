@@ -2,6 +2,7 @@
 """A.R.T command-line application entry point."""
 import multiprocessing
 import sys
+import traceback
 from pathlib import Path
 
 
@@ -21,10 +22,14 @@ def _configure_stdio_encoding():
 _configure_stdio_encoding()
 
 from Scripts.Primary.Menu import menu_once
-def exception_handler(exception_type, exception, traceback):
-    del traceback
+def exception_handler(exception_type, exception, tb):
     print("很抱歉，工具出现错误， 请把以下日志提交给开发者：")
-    sys.stderr.write('{}: {}\n'.format(exception_type.__name__, exception))
+    # Print the full traceback, not just "Type: message". The old one-liner
+    # threw away the frames, so a failure deep in the packers was impossible
+    # to locate — and the message asks the user to report a log that cannot
+    # identify the bug.
+    sys.stderr.write(''.join(
+        traceback.format_exception(exception_type, exception, tb)))
     if input("是否重启 [1=重启/0=退出]") == "1":
         init()
     else:

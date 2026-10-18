@@ -1,8 +1,10 @@
 """DAT/DAT.BR repacker for block packages."""
 
+import io
 import os
 import sys
 import tempfile
+import traceback
 
 from Scripts.Primary import SparseMap
 from Scripts.Primary.RangeModule import RangeSet
@@ -12,6 +14,7 @@ from Scripts.Primary.Utils import (
     RED,
     V,
     call,
+    failure_log,
 )
 
 
@@ -1167,8 +1170,16 @@ class BlockImageDiff(object):
 
 
 # Convert one image into new.dat and transfer.list.
-def _image_to_dat(input_image, outdir='.', version=None, prefix='system'):
-    """Convert an image into Android block OTA package files."""
+def _image_to_dat(input_image, outdir='.', version=None, prefix='system',
+                  log_holder=None):
+    """Convert an image into Android block OTA package files.
+
+    BlockImageDiff.Compute prints a dozen progress lines (stash stats, patch
+    computation, vertex ordering, ...) which are noise on a clean run, so they
+    are kept off the terminal. They are captured into *log_holder* rather than
+    discarded, because they are the only diagnosis when Compute() fails — and
+    when it raises, the partial output is all that is left.
+    """
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
 
@@ -1179,13 +1190,12 @@ def _image_to_dat(input_image, outdir='.', version=None, prefix='system'):
     # fd + temp-file leaks on every DAT/BR repack.
     map_fd, map_path = tempfile.mkstemp(prefix='art-filemap-')
     os.close(map_fd)
-    # BlockImageDiff.Compute prints a dozen progress lines (stash stats,
-    # patch computation, vertex ordering, ...). Silence them to match the
-    # erofs/ext4 repack banner style: the caller prints Process remaking +
-    # Success/Failed; internal detail is noise here.
     _real_stdout = sys.stdout
+    # StringIO is not closed on purpose: getvalue() after close() raises, and
+    # there is no fd to release.
+    buffer = io.StringIO()
     try:
-        sys.stdout = open(os.devnull, 'w')
+        sys.stdout = buffer
         sparse = SparseMap.SparseImage(input_image, map_path, '0')
         try:
             BlockImageDiff(sparse, None, version).Compute(output_prefix)
@@ -1196,11 +1206,9 @@ def _image_to_dat(input_image, outdir='.', version=None, prefix='system'):
             except (AttributeError, OSError):
                 pass
     finally:
-        try:
-            sys.stdout.close()
-        except OSError:
-            pass
         sys.stdout = _real_stdout
+        if log_holder is not None:
+            log_holder.append(buffer.getvalue())
         try:
             os.unlink(map_path)
         except OSError:
@@ -1214,8 +1222,9 @@ def recompress_dat_br(label, distance, flag):
         return
 
     print('Process remaking the file system...', end='', flush=True)
+    detail = []
     try:
-        _image_to_dat(distance, V.out, 4, label)
+        _image_to_dat(distance, V.out, 4, label, log_holder=detail)
         newdat = os.path.join(V.out, f"{label}.new.dat")
         if not os.path.isfile(newdat):
             raise OSError('未生成 .new.dat')
@@ -1223,10 +1232,29 @@ def recompress_dat_br(label, distance, flag):
         if flag == 11:
             level = V.SETUP_MANIFEST["REPACK_BR_LEVEL"]
             newdat_brotli = f"{newdat}.br"
-            rc = call(["brotli", "-q", level, "-j", "-f", "-T", "8", "-o", newdat_brotli, newdat])
-            if rc != 0 or not os.path.isfile(newdat_brotli):
-                raise OSError('brotli 压缩失败')
+            rc, brotli_log = call(
+                ["brotli", "-q", level, "-j", "-f", "-T", "8", "-o", newdat_brotli, newdat],
+                capture=True)
+            if rc != 0:
+                raise OSError(f'brotli 压缩失败: {failure_log(brotli_log, rc)}')
+            if not os.path.isfile(newdat_brotli):
+                # A clean exit that produced nothing: say so, instead of
+                # reporting "退出码 0" as if it were the failure.
+                raise OSError(
+                    f'brotli 退出码 0 但未生成 .br\n{brotli_log}'.strip())
         print(f'\n{GREEN}Success !{CLOSE}')
-    except (OSError, ValueError) as error:
+    except Exception as error:
+        # Bare Exception on purpose: BlockImageDiff is vendored AOSP code that
+        # asserts its invariants (AssertPartition and friends). Those raise
+        # AssertionError, which the narrower OSError/ValueError clause let
+        # escape to main.py's excepthook as a context-free one-liner.
         print(f'\n{RED}Failed !{CLOSE}')
-        print(f'Process log: {error}')
+        reason = f'{type(error).__name__}: {error}' if str(error) \
+            else type(error).__name__
+        print(f'Process log: {reason}')
+        detail_log = '\n'.join(part for part in detail if part.strip()).strip()
+        if detail_log:
+            print(detail_log)
+        if not isinstance(error, (OSError, ValueError)):
+            # Not one of our own deliberate raises — show where it came from.
+            traceback.print_exc()

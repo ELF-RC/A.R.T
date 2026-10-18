@@ -12,6 +12,7 @@ from Scripts.Primary.Utils import (
     call,
     failure_log,
     get_dir_size,
+    missing_artifact_log,
     surface_warnings,
 )
 from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, translate_contexts_to_ascii
@@ -120,7 +121,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
     # used to print Success! and then fail silently in the caller.
     if not os.path.isfile(new_distance):
         print(f'\n{RED}Failed !{CLOSE}')
-        print('Process log: mkfs.erofs 未生成目标镜像')
+        print(f'Process log: {missing_artifact_log("mkfs.erofs", log)}')
         return False
     print(f'\n{GREEN}Success !{CLOSE}')
     surface_warnings(log, 'mkfs.erofs')
