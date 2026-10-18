@@ -6,7 +6,9 @@ import os
 import re
 from pathlib import Path
 
-from Scripts.Primary.Utils import V, call, failure_log, surface_warnings
+from Scripts.Primary.Utils import (
+    V, call, pack_log_path, report_failure, surface_warnings,
+)
 from Scripts.Primary.WorkSpace import record_global_info
 
 
@@ -105,9 +107,11 @@ def extract_erofs(working_source, partition, destination):
             capture=True,
         )
         if exit_code != 0:
-            # decompress_img prints the Success/Failed banner, so only the tool
-            # log goes here — dropping it left the failure with no diagnosis.
-            print(f'Process log: {failure_log(log, exit_code)}')
+            # decompress_img prints the Success/Failed banner, so report_failure
+            # only adds the diagnosis here — dropping the log entirely (the
+            # original regression) left the failure with nothing to go on.
+            report_failure(log, 'extract.erofs', exit_code,
+                           log_path=pack_log_path('extract.erofs', partition))
             return False
         surface_warnings(log, 'extract.erofs')
         if not _normalize_erofs_metadata(partition, config_dir):

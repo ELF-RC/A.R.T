@@ -10,9 +10,9 @@ from Scripts.Primary.Utils import (
     RED,
     V,
     call,
-    failure_log,
     get_dir_size,
-    missing_artifact_log,
+    pack_log_path,
+    report_failure,
     surface_warnings,
 )
 from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, translate_contexts_to_ascii
@@ -115,13 +115,16 @@ def _write_image(state, fsconfig, contexts, source, flag):
         except OSError:
             pass
         print(f'\n{RED}Failed !{CLOSE}')
-        print(f'Process log: {failure_log(log, exit_code)}')
+        report_failure(log, 'mkfs.erofs', exit_code,
+                       log_path=pack_log_path('mkfs.erofs', state["partition"]))
         return False
     # Check the artifact before declaring success: a zero exit with no image
     # used to print Success! and then fail silently in the caller.
     if not os.path.isfile(new_distance):
         print(f'\n{RED}Failed !{CLOSE}')
-        print(f'Process log: {missing_artifact_log("mkfs.erofs", log)}')
+        report_failure(log, 'mkfs.erofs', exit_code,
+                       log_path=pack_log_path('mkfs.erofs', state["partition"]),
+                       reason='mkfs.erofs 未生成目标镜像')
         return False
     print(f'\n{GREEN}Success !{CLOSE}')
     surface_warnings(log, 'mkfs.erofs')
@@ -132,7 +135,8 @@ def _write_image(state, fsconfig, contexts, source, flag):
             ["img2simg", new_distance, distance], capture=True)
         if sparse_code != 0:
             print(f'{RED}Failed !{CLOSE}')
-            print(f'Process log: {failure_log(sparse_log, sparse_code)}')
+            report_failure(sparse_log, 'img2simg', sparse_code,
+                           log_path=pack_log_path('img2simg', state["partition"]))
             return False
         surface_warnings(sparse_log, 'img2simg')
         try:

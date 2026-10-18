@@ -6,6 +6,7 @@ extract, remake, and primary packages.
 
 import os
 import platform
+import re
 import sys
 import shlex
 import shutil
@@ -165,55 +166,200 @@ def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None, capture=False):
     return exit_code
 
 
-# Substrings that mark a line worth showing even when the tool exited 0.
-_WARNING_MARKERS = (
-    'warn', 'error', 'cannot', "can't", 'failed', 'failure',
-    'not found', 'no such', 'unable', 'invalid', 'denied',
-    'missing', 'skip', 'ignored',
+# ---------------------------------------------------------------------------
+# Tool-output severity
+#
+# The bundled tools disagree about how they report problems:
+#
+#   mkfs.erofs  tags lines by level — <E> error, <W> warning, <I> info — and
+#               additionally emits bare `info: ignored token ...` lines for
+#               benign cases, e.g. an fs_config entry that matches no file in
+#               the partition. On a real ROM those number in the thousands (a
+#               MIUI system partition alone produces ~3000), so printing the
+#               captured log verbatim buries the actual error under noise.
+#   e2fsdroid,  no level markers at all — prose only, e.g. "e2fsdroid: No such
+#   mke2fs      file or directory while opening file /path/img".
+#
+# Classification therefore trusts an explicit tag when one is present and
+# falls back to keywords for the prose tools.
+# ---------------------------------------------------------------------------
+_TAGGED_LEVEL = re.compile(r'^\s*<(?P<level>[EWID])>')
+_INFO_PREFIX = re.compile(r'^\s*(?:info|notice|debug)\s*:', re.IGNORECASE)
+
+# Prose worth showing. Deliberately excludes 'ignored' and 'skip', which make
+# up the benign bulk of erofs output.
+_SERIOUS_MARKERS = (
+    'error', 'cannot', "can't", 'failed', 'failure', 'fatal', 'abort',
+    'not found', 'no such', 'unable', 'denied', 'invalid', 'refusing',
+    'warn', 'corrupt', 'overflow', 'mismatch', 'too small', 'too large',
 )
+
+# Cap on how many lines reach the terminal; the rest stay in the log file.
+MAX_LOG_LINES = 40
+
+
+def classify_log(log):
+    """Annotate each non-empty output line as ``serious``, ``info`` or ``other``.
+
+    Returns an ordered ``[(level, line)]`` list so callers can reconstruct the
+    real tail of a run — separate level buckets would scramble it.
+
+    ``info`` means the tool explicitly marked the line as such (an ``<I>`` tag
+    or an ``info:`` prefix). ``other`` is untagged prose carrying no keyword:
+    on mke2fs that is progress output, worthless on success but the only text
+    available when a prose tool fails without a recognizable keyword.
+    """
+    classified = []
+    for raw in (log or '').splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        tagged = _TAGGED_LEVEL.match(line)
+        if tagged:
+            level = 'serious' if tagged.group('level') in 'EW' else 'info'
+        elif _INFO_PREFIX.match(line):
+            level = 'info'
+        elif any(marker in line.lower() for marker in _SERIOUS_MARKERS):
+            level = 'serious'
+        else:
+            level = 'other'
+        classified.append((level, line))
+    return classified
+
+
+def _serious(classified):
+    """Serious lines only, in original order."""
+    return [line for level, line in classified if level == 'serious']
+
+
+def _info_count(classified):
+    """How many lines the tool itself flagged as informational."""
+    return sum(1 for level, _ in classified if level == 'info')
+
+
+def _tail(classified, limit=MAX_LOG_LINES):
+    """Last *limit* lines of a run, in order, whatever their level."""
+    return [line for _, line in classified[-limit:]]
+
+
+def _capped(lines, limit=MAX_LOG_LINES):
+    """Truncate a line list for terminal display, saying how much was cut."""
+    shown = list(lines[:limit])
+    if len(lines) > limit:
+        shown.append(f'…另有 {len(lines) - limit} 行，见完整日志')
+    return shown
+
+
+def save_log(log, log_path):
+    """Write the unfiltered log to *log_path*; return the path, or None.
+
+    A failed pack is diagnosed after the fact more often than not, and the
+    terminal copy is deliberately partial, so the full output has to survive
+    somewhere.
+    """
+    if not log_path or not (log or '').strip():
+        return None
+    parent = os.path.dirname(log_path)
+    try:
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(log_path, 'w', encoding='utf-8') as handle:
+            handle.write(log.rstrip('\n') + '\n')
+    except OSError:
+        return None
+    return log_path
+
+
+def pack_log_path(tool, label=''):
+    """Where a failed *tool* run should dump its full log.
+
+    Lives beside the project workspace so it is easy to find and attach to a
+    bug report. Returns '' when no workspace is set, which makes save_log()
+    a no-op rather than writing into the current directory.
+    """
+    workspace = getattr(V, 'workspace', '') or ''
+    if not workspace or workspace == 'None':
+        return ''
+    name = f'{label}_{tool}' if label else tool
+    return os.path.join(workspace, f'{name}.log')
 
 
 def failure_log(log, exit_code):
-    """Normalize a captured log for display, covering the empty-output case."""
-    return log or f'(无输出，退出码 {exit_code})'
+    """Build a display string for a failed run, dropping the benign bulk.
 
-
-def missing_artifact_log(tool, log):
-    """Build a Process log line for a tool that exited 0 but produced nothing.
-
-    The exit code carries no information here — it is always 0, since a
-    non-zero exit is handled by the caller's earlier branch — so reporting it
-    reads like the success case. Only a non-empty log is appended.
+    Used where a log goes into an exception message rather than straight to
+    the terminal. Falls back to the tail of the log when nothing was
+    recognized as an error, since that is where prose tools report the fatal
+    one — mke2fs and e2fsdroid emit no level tags at all.
     """
-    base = f'{tool} 未生成目标镜像'
-    log = (log or '').strip()
-    return f'{base}\n{log}' if log else base
+    classified = classify_log(log)
+    serious = _serious(classified)
+    if serious:
+        return '\n'.join(_capped(serious))
+    if classified:
+        return '\n'.join(_tail(classified))
+    return f'(无输出，退出码 {exit_code})'
+
+
+def report_failure(log, tool, exit_code, log_path=None, reason=None):
+    """Print a usable diagnosis for a failed tool run.
+
+    Only serious lines reach the terminal. The unfiltered log is written to
+    *log_path* when one is given and its location reported, so the thousands
+    of `info: ignored token` lines a real ROM produces stay available without
+    burying the error they would otherwise hide.
+    """
+    classified = classify_log(log)
+    serious = _serious(classified)
+    info = _info_count(classified)
+    saved = save_log(log, log_path)
+
+    head = reason or f'{tool} 失败 (退出码 {exit_code})'
+    if serious:
+        lines = _capped(serious)
+    elif classified:
+        # Nothing looked like an error: show the end of the run, where tools
+        # usually report what actually went wrong.
+        head += '，未识别出 error 级输出，以下为日志末尾'
+        lines = _tail(classified)
+    else:
+        lines = []
+        head += '，无输出'
+
+    print(f'Process log: {head}')
+    for line in lines:
+        print(f'  {line}')
+    if serious and info:
+        print(f'  (另有 {info} 条 info 级输出)')
+    if saved:
+        print(f'  完整日志: {saved}')
 
 
 def surface_warnings(log, tool=''):
-    """Print warning-looking lines from an otherwise successful run.
+    """Print serious lines from an otherwise successful run.
 
-    Packagers report recoverable problems on stdout and still exit 0 — an
-    fs_config or SELinux label that matched nothing, a skipped special file —
-    so the image comes out subtly wrong with no visible failure. Surfacing
-    only the marker lines keeps the Success!/Failed! style quiet in the normal
-    case without dropping those.
+    A clean exit is not a clean run: e2fsdroid reports unmatched fs_config
+    entries and SELinux labels and still exits 0, leaving the image subtly
+    wrong with no visible failure.
+
+    Info-level lines are counted, never printed: every successful mkfs.erofs
+    emits thousands of benign `info: ignored token` lines for fs_config
+    entries that match no file in the partition, and dumping them would
+    defeat the quiet Success!/Failed! style this function exists to keep.
 
     Returns True when something was printed.
     """
-    if not log:
-        return False
-    hits = [
-        line.strip() for line in log.splitlines()
-        if line.strip()
-        and any(marker in line.lower() for marker in _WARNING_MARKERS)
-    ]
-    if not hits:
+    classified = classify_log(log)
+    serious = _serious(classified)
+    info = _info_count(classified)
+    if not serious and not info:
         return False
     label = f' ({tool})' if tool else ''
     print(f'\n{YELLOW}工具输出提示{label}:{CLOSE}')
-    for line in hits:
+    for line in _capped(serious, 20):
         print(f'  {line}')
+    if info:
+        print(f'  另有 {info} 条 info 级输出（正常，多为 fs_config 条目未匹配到文件）')
     return True
 
 
