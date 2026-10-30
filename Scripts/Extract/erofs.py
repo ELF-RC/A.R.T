@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 
-from Scripts.Primary.Utils import V, call, failure_log, surface_warnings
+from Scripts.Primary.Utils import V, call, failure_log
 from Scripts.Primary.WorkSpace import record_global_info
 
 
@@ -109,7 +109,6 @@ def extract_erofs(working_source, partition, destination):
             # log goes here — dropping it left the failure with no diagnosis.
             print(f'Process log: {failure_log(log, exit_code)}')
             return False
-        surface_warnings(log, 'extract.erofs')
         if not _normalize_erofs_metadata(partition, config_dir):
             return False
         return _commit_extracted_partition(

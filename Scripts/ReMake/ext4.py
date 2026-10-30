@@ -14,7 +14,6 @@ from Scripts.Primary.Utils import (
     ceil,
     failure_log,
     get_dir_size,
-    surface_warnings,
 )
 from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, translate_contexts_to_ascii
 from Scripts.Primary.WorkSpace import load_image_json
@@ -256,11 +255,6 @@ def _write_image(state, fsconfig, contexts, source, flag):
         return False
 
     print(f'\n{GREEN}Success !{CLOSE}')
-    # A clean exit is not a clean run: e2fsdroid reports unmatched fs_config
-    # entries and SELinux labels on stdout and still exits 0, leaving the image
-    # subtly wrong with no visible failure. Surface those.
-    surface_warnings(mkfs_log, 'mke2fs')
-    surface_warnings(e2fs_log, 'e2fsdroid')
     # RESIZE_IMG=1: shrink the image to its minimum footprint (resize2fs -M),
     # matching DNA's "压缩EXT4镜像空间" behaviour. The image is already valid
     # at this point, so a resize2fs failure is warned, not fatal.
@@ -270,8 +264,6 @@ def _write_image(state, fsconfig, contexts, source, flag):
         if resize_code != 0:
             print(f'\n{YELLOW}resize2fs 警告:{CLOSE} '
                   f'{failure_log(resize_log, resize_code)}')
-        else:
-            surface_warnings(resize_log, 'resize2fs')
     if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" or flag > 9:
         print("开始转换: sparse format ...")
         sparse_code, sparse_log = call(
@@ -280,7 +272,6 @@ def _write_image(state, fsconfig, contexts, source, flag):
             print(f'{RED}Failed !{CLOSE}')
             print(f'Process log: {failure_log(sparse_log, sparse_code)}')
             return False
-        surface_warnings(sparse_log, 'img2simg')
         try:
             os.remove(new_distance)
         except OSError:

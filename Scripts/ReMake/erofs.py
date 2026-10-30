@@ -12,7 +12,6 @@ from Scripts.Primary.Utils import (
     call,
     failure_log,
     get_dir_size,
-    surface_warnings,
 )
 from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, translate_contexts_to_ascii
 from Scripts.Primary.WorkSpace import load_image_json
@@ -132,7 +131,6 @@ def _write_image(state, fsconfig, contexts, source, flag):
         print('Process log: mkfs.erofs 未生成目标镜像')
         return False
     print(f'\n{GREEN}Success !{CLOSE}')
-    surface_warnings(log, 'mkfs.erofs')
 
     if V.SETUP_MANIFEST["REPACK_SPARSE_IMG"] == "1" or flag > 9:
         print("开始转换: sparse format ...")
@@ -142,7 +140,6 @@ def _write_image(state, fsconfig, contexts, source, flag):
             print(f'{RED}Failed !{CLOSE}')
             print(f'Process log: {failure_log(sparse_log, sparse_code)}')
             return False
-        surface_warnings(sparse_log, 'img2simg')
         try:
             os.remove(new_distance)
         except OSError:

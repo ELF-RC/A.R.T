@@ -165,44 +165,9 @@ def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None, capture=False):
     return exit_code
 
 
-# Substrings that mark a line worth showing even when the tool exited 0.
-_WARNING_MARKERS = (
-    'warn', 'error', 'cannot', "can't", 'failed', 'failure',
-    'not found', 'no such', 'unable', 'invalid', 'denied',
-    'missing', 'skip', 'ignored',
-)
-
-
 def failure_log(log, exit_code):
     """Normalize a captured log for display, covering the empty-output case."""
     return log or f'(无输出，退出码 {exit_code})'
-
-
-def surface_warnings(log, tool=''):
-    """Print warning-looking lines from an otherwise successful run.
-
-    Packagers report recoverable problems on stdout and still exit 0 — an
-    fs_config or SELinux label that matched nothing, a skipped special file —
-    so the image comes out subtly wrong with no visible failure. Surfacing
-    only the marker lines keeps the Success!/Failed! style quiet in the normal
-    case without dropping those.
-
-    Returns True when something was printed.
-    """
-    if not log:
-        return False
-    hits = [
-        line.strip() for line in log.splitlines()
-        if line.strip()
-        and any(marker in line.lower() for marker in _WARNING_MARKERS)
-    ]
-    if not hits:
-        return False
-    label = f' ({tool})' if tool else ''
-    print(f'\n{YELLOW}工具输出提示{label}:{CLOSE}')
-    for line in hits:
-        print(f'  {line}')
-    return True
 
 
 
