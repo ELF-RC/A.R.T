@@ -14,8 +14,6 @@ from Scripts.Primary.Utils import (
     ceil,
     failure_log,
     get_dir_size,
-    pack_log_path,
-    report_failure,
     surface_warnings,
 )
 from Scripts.Primary.FileConfigPatcher import patch_fsconfig, patch_file_contexts, translate_contexts_to_ascii
@@ -236,14 +234,11 @@ def _write_image(state, fsconfig, contexts, source, flag):
         except (OSError, FileNotFoundError):
             pass
         print(f'\n{RED}Failed !{CLOSE}')
-        report_failure(mkfs_log, 'mke2fs', mkfs_code,
-                       log_path=pack_log_path('mke2fs', state["partition"]))
+        print(f'Process log: {failure_log(mkfs_log, mkfs_code)}')
         return False
     if not os.path.isfile(new_distance):
         print(f'\n{RED}Failed !{CLOSE}')
-        report_failure(mkfs_log, 'mke2fs', mkfs_code,
-                       log_path=pack_log_path('mke2fs', state["partition"]),
-                       reason='mke2fs 未生成目标镜像')
+        print('Process log: mke2fs 未生成目标镜像')
         return False
 
     e2fs_code, e2fs_log = call(e2fsdroid_cmd, capture=True)
@@ -254,11 +249,10 @@ def _write_image(state, fsconfig, contexts, source, flag):
         except (OSError, FileNotFoundError):
             pass
         print(f'\n{RED}Failed !{CLOSE}')
-        report_failure(
-            e2fs_log, 'e2fsdroid', e2fs_code,
-            log_path=pack_log_path('e2fsdroid', state["partition"]),
-            # Exit 0 with no artifact: the reason is still in the tool output.
-            reason=None if e2fs_code != 0 else 'e2fsdroid 未生成目标镜像')
+        if e2fs_code != 0:
+            print(f'Process log: {failure_log(e2fs_log, e2fs_code)}')
+        else:
+            print('Process log: e2fsdroid 未生成目标镜像')
         return False
 
     print(f'\n{GREEN}Success !{CLOSE}')
@@ -284,8 +278,7 @@ def _write_image(state, fsconfig, contexts, source, flag):
             ["img2simg", new_distance, distance], capture=True)
         if sparse_code != 0:
             print(f'{RED}Failed !{CLOSE}')
-            report_failure(sparse_log, 'img2simg', sparse_code,
-                           log_path=pack_log_path('img2simg', state["partition"]))
+            print(f'Process log: {failure_log(sparse_log, sparse_code)}')
             return False
         surface_warnings(sparse_log, 'img2simg')
         try:
