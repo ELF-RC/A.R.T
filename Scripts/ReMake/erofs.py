@@ -21,9 +21,18 @@ from Scripts.ReMake.dat_br import recompress_dat_br
 
 # Metadata normalization, image construction, and DAT hand-off.
 def walk_contexts(path):
-    """Deduplicate a generated fs config or SELinux contexts file."""
+    """Deduplicate a generated fs config or SELinux contexts file.
+
+    Order-preserving on purpose: mkfs.erofs 1.9.4 assumes the fs_config file
+    is sorted by path, and patch_fsconfig emits it sorted. Deduping with a
+    bare set() scrambles that order (iteration order follows the set's hash
+    layout, not the input), which makes mkfs.erofs segfault at
+    `0x1b4` (SEGV_MAPERR) right after `loaded N fs_config entries` — exit 139,
+    no <E> output, no artifact. dict.fromkeys() drops duplicates while keeping
+    first-seen order, so the sort patch_fsconfig established survives.
+    """
     with open(path, "r", encoding="UTF-8") as source:
-        lines = list(set(source.readlines()))
+        lines = list(dict.fromkeys(source.readlines()))
     if os.path.isfile(path):
         os.remove(path)
     with open(path, "a+", encoding="UTF-8") as target:
