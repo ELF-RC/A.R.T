@@ -166,8 +166,70 @@ def call(exe, kz='Y', out=0, shstate=False, sp=0, env=None, capture=False):
 
 
 def failure_log(log, exit_code):
-    """Normalize a captured log for display, covering the empty-output case."""
-    return log or f'(无输出，退出码 {exit_code})'
+    """Return captured tool output for display, minus the bulk noise.
+
+    A failed mkfs.erofs on a real ROM produces ~22k lines, of which the useful
+    part is one or two. Measured on a system partition:
+
+      - 18k ``Processing <path> ...``   per-file progress
+      - 3k  ``<E> failed to write ...`` the same error repeated per thread
+      - 937 ``info: ignored token ...``  fs_config entries matching no file
+
+    Printing that verbatim buries the error and pushes it past the terminal
+    scrollback, which is how a real failure ends up looking like "only info
+    lines were printed". Drop the progress and info lines, and collapse runs
+    of an identical repeated line into one with a count — what is left is the
+    version banner plus the actual error.
+
+    mke2fs and e2fsdroid emit untagged prose with neither prefix, so nothing
+    is dropped for them.
+    """
+    if not log or not log.strip():
+        return f'(无输出，退出码 {exit_code})'
+
+    kept = []
+    for raw in log.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        # erofs-utils always puts its level tag at the start of a line, so a
+        # tag further in means concurrent writers interleaved two lines —
+        # crop the leftover progress fragment in front of it.
+        for tag in ('<E>', '<W>', '<I>'):
+            pos = line.find(tag)
+            if pos > 0:
+                line = line[pos:]
+                break
+        if line.startswith('info:') or line.startswith('Processing '):
+            continue
+        # With -T 0 several threads write progress at once, so a dropped
+        # 'Processing <path> ...' line often survives as its own tail.
+        if line.endswith(' ...'):
+            continue
+        kept.append(line)
+    if not kept:
+        return f'(无输出，退出码 {exit_code})'
+
+    # Collapse adjacent duplicates: a failing write repeats the same <E> line
+    # once per file/thread, which would otherwise drown its first occurrence.
+    grouped = []
+    for line in kept:
+        if grouped and grouped[-1][0] == line:
+            grouped[-1][1] += 1
+        else:
+            grouped.append([line, 1])
+    rendered = [
+        f'{line} (×{count})' if count > 1 else line
+        for line, count in grouped
+    ]
+
+    limit = 40
+    if len(rendered) > limit:
+        # Keep the banner and the tail: tools report the fatal line last.
+        rendered = (rendered[:1]
+                    + [f'…省略 {len(rendered) - limit} 行…']
+                    + rendered[-(limit - 2):])
+    return '\n'.join(rendered)
 
 
 
