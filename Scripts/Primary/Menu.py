@@ -322,11 +322,13 @@ def _select_pack_candidates(option, candidates):
           f'{_pad("类型", 10)} {_pad("大小", 9, "right")}')
     print(f'  {"-" * 4}  {"-" * 20} {"-" * 10} {"-" * 9}')
     for idx, (name, _source, _fsconfig, _contexts, kind, size) in enumerate(candidates, 1):
-        print(f'  {_pad(str(idx), 4, "right")}  {_pad(name, 20)} '
+        # The index is padded to 2 then followed by 4 spaces: the digits sit two
+        # columns left of the header's 4-wide field, while the columns after it
+        # keep the header's alignment.
+        print(f'  {_pad(str(idx), 2, "right")}    {_pad(name, 20)} '
               f'{_pad(kind, 10)} {_pad(_human_size(size), 9, "right")}')
 
-    print(f'\n{YELLOW}输入要合成的 分区名/序号，all全选，空格分开{CLOSE}')
-    print(f'{YELLOW}  输入 0 跳过{CLOSE}')
+    print(f'\n{YELLOW}输入要合成的 分区名/序号，all全选，空格分开，0跳过{CLOSE}')
     answer = input('> ').strip()
     if not answer or answer == '0':
         print(f'{YELLOW}> 未选择任何分区，跳过合成{CLOSE}')

@@ -248,10 +248,10 @@ def _show_partitions(partitions):
 # ---------------------------------------------------------------------------
 # Extract selected logical partitions.
 def _extract_selected(super_img_path, out_dir, partitions, selected_indices):
-    """Extract selected logical partitions with the embedded LP unpacker."""
+    """Extract selected logical partitions; return the images actually written."""
     if not selected_indices:
         print(f'{YELLOW}> 未选择任何分区，跳过提取{CLOSE}')
-        return
+        return []
 
     names = [partitions[i][0] for i in selected_indices]
     print(f'\n{BOLD}> 开始提取 {len(names)} 个分区：{", ".join(names)}{CLOSE}')
@@ -272,6 +272,29 @@ def _extract_selected(super_img_path, out_dir, partitions, selected_indices):
         print(f'\n{GREEN}> 提取完成！文件已输出到 {out_dir}{CLOSE}\n')
     except (LpUnpackError, OSError, ValueError) as e:
         print(f'{RED}> 提取失败: {e}{CLOSE}')
+        return []
+
+    # The unpacker writes <name>.img, and the name is validated but never
+    # rewritten, so the file stem is the partition name.
+    produced = []
+    for name in names:
+        image = os.path.join(out_dir, f'{name}.img')
+        if os.path.isfile(image) and os.path.getsize(image) > 0:
+            produced.append((image, name))
+    return produced
+
+
+# ---------------------------------------------------------------------------
+# Optional second stage: decompose the freshly extracted images in place.
+# ---------------------------------------------------------------------------
+# Decompose the extracted logical-partition images into WORKSPACE.
+def _decompose_extracted(images):
+    """Decompose each extracted image into WORKSPACE/<partition>/."""
+    from Scripts.Extract.image import decompress_img
+
+    for image, partition in images:
+        print(f'\n{BOLD}> 分解 {os.path.basename(image)} -> {partition}{CLOSE}')
+        decompress_img(image, workspace_partition(partition))
 
 
 # ---------------------------------------------------------------------------
@@ -313,8 +336,16 @@ def super_selective_main():
 
     selected = _show_partitions(partitions)
 
-    if selected:
-        _extract_selected(effective_path, out_dir, partitions, selected)
+    extracted = _extract_selected(effective_path, out_dir, partitions, selected) if selected else []
+
+    if extracted:
+        print(f'{BOLD}> 待分解的镜像：{CLOSE}')
+        for image, partition in extracted:
+            print(f'  {os.path.basename(image)}  ->  {partition}/  '
+                  f'({_human_size(os.path.getsize(image))})')
+        print()
+        if input('> 是否继续分解img [0/1]: ').strip() == '1':
+            _decompose_extracted(extracted)
 
     # Clean up any shared sparse→raw temp files created during this session.
     _SparseRawCache.cleanup_all()
