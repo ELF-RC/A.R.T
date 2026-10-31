@@ -2,16 +2,17 @@
 
 import os
 import sys
+import unicodedata
 from glob import glob
 from pathlib import Path
 
 from Scripts.Primary.Utils import (
-    V, PWD_DIR, RED, CLOSE,
+    V, PWD_DIR, RED, GREEN, YELLOW, BOLD, CLOSE,
     rmdire,
 )
 from Scripts.Primary.Console import CoastTime
 from Scripts.Primary.Settings import load_setup_json, env_setup
-from Scripts.Primary.WorkSpace import envelop_project, workspace_partition
+from Scripts.Primary.WorkSpace import envelop_project
 from Scripts.Primary.WorkSpace import LayoutError, UnsupportedLayoutError
 
 MOD_DIR = PWD_DIR + "local/sub/"
@@ -236,6 +237,153 @@ def menu_modules():
             print(f"> Number \x1b[0;33m{choice}\x1b[0m enter error !")
 
 
+# ---------------------------------------------------------------------------
+# Partition repacking (options 9-11: img / new.dat / new.dat.br)
+# ---------------------------------------------------------------------------
+_PACK_FORMATS = {9: 'img', 10: 'new.dat', 11: 'new.dat.br'}
+
+
+def _human_size(size):
+    """Human-readable byte count for the candidate table."""
+    if size < 1024:
+        return f'{size} B'
+    if size < 1024 * 1024:
+        return f'{size / 1024:.1f} KB'
+    if size < 1024 * 1024 * 1024:
+        return f'{size / (1024 * 1024):.1f} MB'
+    return f'{size / (1024 * 1024 * 1024):.2f} GB'
+
+
+def _display_width(text):
+    """Terminal columns a string occupies (CJK glyphs are double-width)."""
+    return sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1
+               for ch in text)
+
+
+def _pad(text, width, align='left'):
+    """Pad *text* to *width* display columns, not characters."""
+    fill = max(0, width - _display_width(text))
+    return (' ' * fill + text) if align == 'right' else (text + ' ' * fill)
+
+
+# Collect the partitions that can be repacked from the current project.
+def _pack_candidates(option):
+    """Return [(name, source, fsconfig, contexts, kind, size), ...]."""
+    from Scripts.Primary.Utils import get_dir_size
+    from Scripts.Primary.WorkSpace import (
+        load_global_info, partition_metadata_names, workspace_partition,
+    )
+
+    packer = 'erofs' if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "1" else 'ext4'
+    candidates = []
+    for name, record in sorted(load_global_info(V.config).items()):
+        source = workspace_partition(name)
+        if not os.path.isdir(source):
+            continue
+        is_kernel = isinstance(record, dict) and record.get('type') == 'kernel'
+        if is_kernel:
+            # boot 只合成 .img，仅 option 9 提供
+            if option != 9:
+                continue
+            candidates.append((name, source, None, None, 'kernel', get_dir_size(source)))
+            continue
+        contexts, fsconfig = partition_metadata_names(name)
+        contexts = V.config + contexts
+        fsconfig = V.config + fsconfig
+        if not (os.path.isfile(contexts) and os.path.isfile(fsconfig)):
+            continue
+        candidates.append(
+            (name, source, fsconfig, contexts, packer, get_dir_size(source)))
+    return candidates
+
+
+# Display the candidate table and return the selection.
+def _select_pack_candidates(option, candidates):
+    """Print candidates, return the chosen entries ([] when skipped)."""
+    out_label = os.path.basename(V.out.rstrip(os.sep)) or V.out
+    suffix = _PACK_FORMATS[option]
+
+    # A single candidate gets a dedicated confirmation screen, matching the
+    # single-image decomposition flow.
+    if len(candidates) == 1:
+        name, _source, _fsconfig, _contexts, kind, size = candidates[0]
+        print('─' * 40)
+        print(f' 合成: {name}.{suffix}')
+        print('─' * 40)
+        print(f'\n类型: {kind}')
+        print(f'大小: {_human_size(size)}')
+        print(f'输出: {out_label}/{name}.{suffix}')
+        if input('\n是否继续? [Y/n] ').strip().lower() in ('n', 'no'):
+            return []
+        return candidates
+
+    print(f'\n发现 {len(candidates)} 个可合成分区：\n')
+    print(f'  {_pad("序号", 4, "right")}  {_pad("分区名", 20)} '
+          f'{_pad("类型", 10)} {_pad("大小", 9, "right")}')
+    print(f'  {"-" * 4}  {"-" * 20} {"-" * 10} {"-" * 9}')
+    for idx, (name, _source, _fsconfig, _contexts, kind, size) in enumerate(candidates, 1):
+        print(f'  {_pad(str(idx), 4, "right")}  {_pad(name, 20)} '
+              f'{_pad(kind, 10)} {_pad(_human_size(size), 9, "right")}')
+
+    print(f'\n{YELLOW}输入要合成的 分区名/序号，all全选，空格分开{CLOSE}')
+    print(f'{YELLOW}  输入 0 跳过{CLOSE}')
+    answer = input('> ').strip()
+    if not answer or answer == '0':
+        print(f'{YELLOW}> 未选择任何分区，跳过合成{CLOSE}')
+        return []
+    if answer.lower() == 'all':
+        return candidates
+
+    selected = []
+    for token in answer.replace('，', ' ').replace(',', ' ').split():
+        if token.isdigit():
+            idx = int(token)
+            entry = candidates[idx - 1] if 1 <= idx <= len(candidates) else None
+        else:
+            entry = next((c for c in candidates if c[0] == token), None)
+        if entry is None:
+            print(f'  {RED}无效输入: {token}{CLOSE}')
+        elif entry not in selected:
+            selected.append(entry)
+    if not selected:
+        print(f'{YELLOW}> 未选择任何分区，跳过合成{CLOSE}')
+    return selected
+
+
+# Repack the selected partitions (option 9/10/11 entry point).
+def menu_pack(option):
+    """Synthesize the selected partitions into img / dat / dat.br."""
+    from Scripts.ReMake.boot import boot_repack
+    from Scripts.ReMake.ext4 import recompress_ext4
+    from Scripts.ReMake.erofs import recompress_erofs
+
+    os.system("clear")
+    print(f'{BOLD}> 合成 [{_PACK_FORMATS[option]}]{CLOSE}')
+    print('-------------------------------------------------------')
+
+    candidates = _pack_candidates(option)
+    if not candidates:
+        print(f'{RED}> 当前工程内未找到可合成的分区镜像{CLOSE}')
+        return
+
+    selected = _select_pack_candidates(option, candidates)
+    if not selected:
+        return
+
+    infojson = V.config + 'info.json'
+    if not os.path.isfile(infojson):
+        infojson = None
+    print()
+    for name, source, fsconfig, contexts, kind, _size in selected:
+        if kind == 'kernel':
+            boot_repack(source, V.out)
+            continue
+        if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "1":
+            recompress_erofs(source, fsconfig, contexts, infojson, int(option))
+        else:
+            recompress_ext4(source, fsconfig, contexts, infojson, int(option))
+
+
 # Fixed menu actions and main operation dispatcher.
 menu_actions = {
     66: sys.exit,
@@ -250,9 +398,6 @@ def menu_main():
     from Scripts.Extract.image import decompress
     from Scripts.Extract.payload import decompress_bin
     from Scripts.Extract.win import decompress_win
-    from Scripts.ReMake.boot import boot_repack
-    from Scripts.ReMake.erofs import recompress_erofs
-    from Scripts.ReMake.ext4 import recompress_ext4
     while True:
         os.system("clear")
         print(f'\x1b[1;36m> 当前工程: \x1b[0m{V.project}')
@@ -313,49 +458,7 @@ def menu_main():
             More.main()
             continue
         elif int(option) in [9, 10, 11]:
-            from Scripts.Primary.WorkSpace import load_global_info, partition_metadata_names
-            info = load_global_info(V.config)
-            infojson = V.config + 'info.json'
-            if not os.path.isfile(infojson):
-                infojson = None
-            candidates = []  # (f_basename, source_dir, fsconfig, contexts, is_kernel)
-
-            for f_basename, rec in sorted(info.items()):
-                source = workspace_partition(f_basename)
-                if not os.path.isdir(source):
-                    continue
-                is_kernel = isinstance(rec, dict) and rec.get('type') == 'kernel'
-                if is_kernel:
-                    # boot 只合成 .img，仅 option 9 提供
-                    if int(option) != 9:
-                        continue
-                    candidates.append((f_basename, source, None, None, True))
-                else:
-                    contexts, fsconfig = partition_metadata_names(f_basename)
-                    contexts = V.config + contexts
-                    fsconfig = V.config + fsconfig
-                    if not (os.path.isfile(contexts) and os.path.isfile(fsconfig)):
-                        continue
-                    candidates.append((f_basename, source, fsconfig, contexts, False))
-
-            if not candidates:
-                print('> 当前工程内未找到可合成的分区镜像')
-                continue
-            for f_basename, source, fsconfig, contexts, is_kernel in candidates:
-                if is_kernel:
-                    print(f'是否合成: {f_basename}.img [1/0]: ', end='')
-                    if input() != '1':
-                        continue
-                    boot_repack(source, V.out)
-                    continue
-                txts = {9: "img", 10: "new.dat", 11: "new.dat.br"}
-                print(f'是否合成: {f_basename}.{txts.get(int(option), ".new.dat.br")} [1/0]: ', end='')
-                if input() != '1':
-                    continue
-                if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "1":
-                    recompress_erofs(source, fsconfig, contexts, infojson, int(option))
-                else:
-                    recompress_ext4(source, fsconfig, contexts, infojson, int(option))
+            menu_pack(int(option))
         else:
             input(f'\x1b[0;33m{option}\x1b[0m enter error !')
             continue
