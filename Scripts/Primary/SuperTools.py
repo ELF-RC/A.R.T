@@ -1,6 +1,6 @@
 """Shared Android dynamic-partition (super.img) tools."""
 
-from Scripts.Primary.ImageTools import is_sparse_image, sparse_to_raw
+from Scripts.Primary.ImageTools import is_sparse_image
 
 
 import argparse
@@ -554,59 +554,6 @@ class LpUnpackError(Exception):
         return self.message
 
 
-class _SparseRawCache:
-    """Track sparse→raw temp files so multiple LpUnpack instances share
-    the same raw image instead of converting it repeatedly.
-
-    acquire() registers a raw_path for a given source. If the source already
-    has a registered path, that path is returned (the raw file must still
-    exist on disk). Otherwise raw_path is registered as the new shared path.
-
-    release() unregisters the source WITHOUT deleting the file. This allows
-    the next LpUnpack instance to reuse the same raw file.
-
-    cleanup_all() deletes all remaining raw files and clears the registry.
-    Call it at the end of the entry-point function (e.g. super_selective_main).
-    """
-    _entries: dict = {}  # source_abs -> raw_path
-
-    @classmethod
-    def acquire(cls, source_abs, raw_path):
-        """Return the shared raw path for source_abs, registering it if new."""
-        if source_abs in cls._entries:
-            return cls._entries[source_abs]
-        cls._entries[source_abs] = raw_path
-        return raw_path
-
-    @classmethod
-    def release(cls, source_abs):
-        """Unregister source_abs.
-
-        The raw file remains on disk so that a subsequent LpUnpack instance
-        can reuse it via acquire() (which checks _entries before deciding
-        whether to convert). cleanup_all() at the end of the entry point
-        deletes the file and clears _entries.
-
-        Note: release() intentionally does NOT pop from _entries, so that
-        cleanup_all() can still find and delete the file.
-        """
-        pass
-
-    @classmethod
-    def cleanup_all(cls):
-        """Delete all cached raw files and clear the registry.
-
-        Must be called at the end of the entry-point function
-        (e.g. super_selective_main) to remove temp files.
-        """
-        for raw_path in list(cls._entries.values()):
-            try:
-                os.remove(raw_path)
-            except OSError:
-                pass
-        cls._entries.clear()
-
-
 _SAFE_PARTITION_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*\Z')
 
 
@@ -635,41 +582,21 @@ class LpUnpack:
         self._config = kwargs.get('CONFIG', None)
         self._slot_num = None
         source = kwargs.get('SUPER_IMAGE')
-        super_image = source
-        raw_path = None
-        raw_cache_key = None
         if is_sparse_image(source):
-            temp_dir = kwargs.get("TEMP_DIR") or kwargs.get("OUTPUT_DIR") or os.path.dirname(os.path.abspath(source))
-            os.makedirs(temp_dir, exist_ok=True)
-            raw_name = f".{os.path.basename(source)}.unsparse.img"
-            raw_path = os.path.join(temp_dir, raw_name)
-            raw_cache_key = os.path.abspath(source)
-            # Reuse a shared raw file if another LpUnpack instance has
-            # already converted the same source; otherwise convert now.
-            if os.path.exists(raw_path):
-                print('Sparse image detected.')
-                print('Reusing cached non-sparse image...')
-            else:
-                print('Sparse image detected.')
-                print('Process conversion to non sparse image...')
-                sparse_to_raw(source, raw_path, temp_dir=temp_dir)
-                print('Result:[ok]')
-            raw_path = _SparseRawCache.acquire(raw_cache_key, raw_path)
-            super_image = raw_path
-        self._super_image = super_image
-        self._temporary_super_image = raw_path
-        self._raw_cache_key = raw_cache_key
-        self._fd: BinaryIO = open(super_image, 'rb')
+            # Sparse inputs are expanded in place by expand_sparse_in_place()
+            # before any entry point reaches LpUnpack, so a sparse file here
+            # means a caller skipped that step. Fail loudly: silently
+            # converting would write a multi-GB temp file nobody cleans up.
+            raise LpUnpackError(
+                f'super 镜像仍是 sparse 格式，请先用 expand_sparse_in_place() 展开: {source}'
+            )
+        self._super_image = source
+        self._fd: BinaryIO = open(source, 'rb')
         self._out_dir = kwargs.get('OUTPUT_DIR', None)
 
     def close(self):
         if not self._fd.closed:
             self._fd.close()
-        if self._temporary_super_image:
-            key = getattr(self, '_raw_cache_key', None)
-            if key is not None:
-                _SparseRawCache.release(key)
-            self._temporary_super_image = None
 
     def _check_out_dir_exists(self):
         if self._out_dir is None:
@@ -870,8 +797,8 @@ class LpUnpack:
 
 
 # Programmatic super unpack facade.
-def unpack(file: str, out: str, parts: list = None, temp_dir: str = None):
-    namespace = argparse.Namespace(SUPER_IMAGE=file, OUTPUT_DIR=out, SHOW_INFO=False, NAME=parts, TEMP_DIR=temp_dir)
+def unpack(file: str, out: str, parts: list = None):
+    namespace = argparse.Namespace(SUPER_IMAGE=file, OUTPUT_DIR=out, SHOW_INFO=False, NAME=parts)
     if not os.path.exists(namespace.SUPER_IMAGE):
         raise FileNotFoundError(f"{namespace.SUPER_IMAGE} Cannot Find")
     else:

@@ -7,7 +7,7 @@ from pathlib import Path
 from Scripts.Primary.Utils import V
 from Scripts.Primary.ImageTools import expand_sparse_in_place
 from Scripts.Primary.WorkSpace import workspace_partition
-from Scripts.Primary.SuperTools import LpUnpack, LpUnpackError, _SparseRawCache, unpack
+from Scripts.Primary.SuperTools import LpUnpack, LpUnpackError, unpack
 
 
 # Normalize logical-partition image names before recursion.
@@ -114,7 +114,7 @@ def extract_super(working_source, partition):
     print(f'正在分解: {os.path.basename(working_source)} <super>')
     super_dir = os.path.join(V.workspace, 'super') + os.sep
     try:
-        unpack(working_source, super_dir, temp_dir=super_dir)
+        unpack(working_source, super_dir)
     except (LpUnpackError, OSError, ValueError, SystemExit) as error:
         print(f'> super 分解失败: {error}')
         return False
@@ -184,7 +184,7 @@ def _human_size(b):
 # Read metadata for the selective extraction screen.
 def _list_partitions(super_img_path):
     """Parse super metadata and return (sorted_partition_info, effective_img_path)."""
-    job = LpUnpack(SUPER_IMAGE=super_img_path, SHOW_INFO=False, TEMP_DIR=V.workspace)
+    job = LpUnpack(SUPER_IMAGE=super_img_path, SHOW_INFO=False)
     effective_path = super_img_path
     job._fd.seek(0)
     metadata = job._read_metadata()
@@ -270,7 +270,6 @@ def _extract_selected(super_img_path, stage_dir, partitions, selected_indices):
             OUTPUT_DIR=stage_dir,
             NAME=names,
             SHOW_INFO=False,
-            TEMP_DIR=V.workspace,
         )
         job.unpack()
         print(f'\n{GREEN}> 提取完成{CLOSE}\n')
@@ -351,12 +350,10 @@ def super_selective_main():
     if not partitions:
         print(f'{RED}> super.img 内未发现分区或解析失败{CLOSE}')
         input('> 任意键继续')
-        _SparseRawCache.cleanup_all()
         return
 
     selected = _show_partitions(partitions)
     if not selected:
-        _SparseRawCache.cleanup_all()
         return
 
     # Stage into WORKSPACE first: extraction and decomposition need the same
@@ -366,7 +363,6 @@ def super_selective_main():
     extracted = _extract_selected(effective_path, stage_dir, partitions, selected)
     if not extracted:
         shutil.rmtree(stage_dir, ignore_errors=True)
-        _SparseRawCache.cleanup_all()
         return
 
     print(f'{BOLD}> 已提取的镜像：{CLOSE}')
@@ -384,9 +380,6 @@ def super_selective_main():
         _cleanup_super_ab(stage_dir)
         _move_super_images_to_out(stage_dir, out_dir)
         shutil.rmtree(stage_dir, ignore_errors=True)
-
-    # Clean up any shared sparse→raw temp files created during this session.
-    _SparseRawCache.cleanup_all()
 
 
 
