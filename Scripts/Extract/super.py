@@ -87,9 +87,9 @@ def _cleanup_super_ab(super_dir):
             pb.rename(dest)
 
 
-def _move_super_images_to_out(super_dir):
+def _move_super_images_to_out(super_dir, out_dir=None):
     """Move remaining .img files from super_dir to OUT."""
-    out_dir = V.out
+    out_dir = out_dir or V.out
     if not os.path.isdir(out_dir):
         os.makedirs(out_dir)
     remaining = [f for f in os.listdir(super_dir) if f.endswith('.img')]
@@ -247,38 +247,42 @@ def _show_partitions(partitions):
 # Core: extract the selected partitions.
 # ---------------------------------------------------------------------------
 # Extract selected logical partitions.
-def _extract_selected(super_img_path, out_dir, partitions, selected_indices):
-    """Extract selected logical partitions; return the images actually written."""
+def _extract_selected(super_img_path, stage_dir, partitions, selected_indices):
+    """Extract selected logical partitions into the WORKSPACE/super staging area.
+
+    Returns the images actually written. They stay in the staging area until
+    the caller either decomposes them or normalizes and moves them to OUT.
+    """
     if not selected_indices:
         print(f'{YELLOW}> 未选择任何分区，跳过提取{CLOSE}')
         return []
 
     names = [partitions[i][0] for i in selected_indices]
     print(f'\n{BOLD}> 开始提取 {len(names)} 个分区：{", ".join(names)}{CLOSE}')
-    print(f'> 输出目录: {out_dir}')
     print()
 
     try:
         # Use the embedded LP unpacker with NAME filtering, SHOW_INFO=False, and OUTPUT_DIR.
-        os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(stage_dir, exist_ok=True)
         job = LpUnpack(
             SUPER_IMAGE=super_img_path,
-            OUTPUT_DIR=out_dir,
+            OUTPUT_DIR=stage_dir,
             NAME=names,
             SHOW_INFO=False,
             TEMP_DIR=V.workspace,
         )
         job.unpack()
-        print(f'\n{GREEN}> 提取完成！文件已输出到 {out_dir}{CLOSE}\n')
+        print(f'\n{GREEN}> 提取完成{CLOSE}\n')
     except (LpUnpackError, OSError, ValueError) as e:
-        print(f'{RED}> 提取失败: {e}{CLOSE}')
+        print(f'Process log: {e}')
+        print('\x1b[1;31mFailed !\x1b[0m')
         return []
 
     # The unpacker writes <name>.img, and the name is validated but never
     # rewritten, so the file stem is the partition name.
     produced = []
     for name in names:
-        image = os.path.join(out_dir, f'{name}.img')
+        image = os.path.join(stage_dir, f'{name}.img')
         if os.path.isfile(image) and os.path.getsize(image) > 0:
             produced.append((image, name))
     return produced
@@ -287,14 +291,18 @@ def _extract_selected(super_img_path, out_dir, partitions, selected_indices):
 # ---------------------------------------------------------------------------
 # Optional second stage: decompose the freshly extracted images in place.
 # ---------------------------------------------------------------------------
-# Decompose the extracted logical-partition images into WORKSPACE.
-def _decompose_extracted(images):
-    """Decompose each extracted image into WORKSPACE/<partition>/."""
+# Decompose the staged logical-partition images into WORKSPACE.
+def _decompose_extracted(stage_dir):
+    """Normalize A/B names, then decompose every staged image into WORKSPACE."""
     from Scripts.Extract.image import decompress_img
 
-    for image, partition in images:
-        print(f'\n{BOLD}> 分解 {os.path.basename(image)} -> {partition}{CLOSE}')
-        decompress_img(image, workspace_partition(partition))
+    # Rename <part>_a/_b -> <part> first; decompress_img works on bare names.
+    _cleanup_super_ab(stage_dir)
+    for image in sorted(Path(stage_dir).glob('*.img')):
+        if image.stat().st_size == 0:
+            continue
+        print(f'\n{BOLD}> 分解 {image.name} -> {image.stem}{CLOSE}')
+        decompress_img(str(image), workspace_partition(image.stem))
 
 
 # ---------------------------------------------------------------------------
@@ -335,17 +343,34 @@ def super_selective_main():
         return
 
     selected = _show_partitions(partitions)
+    if not selected:
+        return
 
-    extracted = _extract_selected(effective_path, out_dir, partitions, selected) if selected else []
+    # Stage into WORKSPACE first: extraction and decomposition need the same
+    # scratch space, and only what survives normalization reaches OUT.
+    stage_dir = os.path.join(V.workspace, 'super') + os.sep
+    shutil.rmtree(stage_dir, ignore_errors=True)
+    extracted = _extract_selected(effective_path, stage_dir, partitions, selected)
+    if not extracted:
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        _SparseRawCache.cleanup_all()
+        return
 
-    if extracted:
-        print(f'{BOLD}> 待分解的镜像：{CLOSE}')
-        for image, partition in extracted:
-            print(f'  {os.path.basename(image)}  ->  {partition}/  '
-                  f'({_human_size(os.path.getsize(image))})')
-        print()
-        if input('> 是否继续分解img [0/1]: ').strip() == '1':
-            _decompose_extracted(extracted)
+    print(f'{BOLD}> 已提取的镜像：{CLOSE}')
+    for image, partition in extracted:
+        print(f'  {os.path.basename(image)}  ->  {partition}  '
+              f'({_human_size(os.path.getsize(image))})')
+    print()
+    print(f'  镜像暂存于 {stage_dir}')
+
+    if input('> 是否继续分解img [0/1]: ').strip() == '1':
+        _decompose_extracted(stage_dir)
+        shutil.rmtree(stage_dir, ignore_errors=True)
+    else:
+        # Normalize A/B names, then hand the plain images to OUT.
+        _cleanup_super_ab(stage_dir)
+        _move_super_images_to_out(stage_dir, out_dir)
+        shutil.rmtree(stage_dir, ignore_errors=True)
 
     # Clean up any shared sparse→raw temp files created during this session.
     _SparseRawCache.cleanup_all()
