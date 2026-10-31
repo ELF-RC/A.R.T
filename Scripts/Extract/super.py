@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from Scripts.Primary.Utils import V
+from Scripts.Primary.ImageTools import expand_sparse_in_place
 from Scripts.Primary.WorkSpace import workspace_partition
 from Scripts.Primary.SuperTools import LpUnpack, LpUnpackError, _SparseRawCache, unpack
 
@@ -333,6 +334,16 @@ def super_selective_main():
     if not out_dir:
         out_dir = input_dir.replace('INPUT', 'OUT') + os.sep
 
+    # Expand a sparse super.img before anything reads it, exactly as menu 4
+    # does: the raw image replaces the sparse file in INPUT, so no later stage
+    # has to know about sparse at all and nothing is left in WORKSPACE.
+    try:
+        super_path = expand_sparse_in_place(super_path)
+    except (OSError, ValueError) as error:
+        print(f'Process log: {error}')
+        print('\x1b[1;31mFailed !\x1b[0m')
+        return
+
     os.system("clear")
     print(f'\n{BOLD}> 正在读取 super 元数据...{CLOSE}')
     partitions, effective_path = _list_partitions(super_path)
@@ -340,10 +351,12 @@ def super_selective_main():
     if not partitions:
         print(f'{RED}> super.img 内未发现分区或解析失败{CLOSE}')
         input('> 任意键继续')
+        _SparseRawCache.cleanup_all()
         return
 
     selected = _show_partitions(partitions)
     if not selected:
+        _SparseRawCache.cleanup_all()
         return
 
     # Stage into WORKSPACE first: extraction and decomposition need the same
