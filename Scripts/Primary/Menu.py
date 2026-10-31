@@ -2,13 +2,12 @@
 
 import os
 import sys
-import unicodedata
 from glob import glob
 from pathlib import Path
 
 from Scripts.Primary.Utils import (
     V, PWD_DIR, RED, GREEN, YELLOW, BOLD, CLOSE,
-    rmdire,
+    human_size, pad, rmdire,
 )
 from Scripts.Primary.Console import CoastTime
 from Scripts.Primary.Settings import load_setup_json, env_setup
@@ -243,29 +242,6 @@ def menu_modules():
 _PACK_FORMATS = {9: 'img', 10: 'new.dat', 11: 'new.dat.br'}
 
 
-def _human_size(size):
-    """Human-readable byte count for the candidate table."""
-    if size < 1024:
-        return f'{size} B'
-    if size < 1024 * 1024:
-        return f'{size / 1024:.1f} KB'
-    if size < 1024 * 1024 * 1024:
-        return f'{size / (1024 * 1024):.1f} MB'
-    return f'{size / (1024 * 1024 * 1024):.2f} GB'
-
-
-def _display_width(text):
-    """Terminal columns a string occupies (CJK glyphs are double-width)."""
-    return sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1
-               for ch in text)
-
-
-def _pad(text, width, align='left'):
-    """Pad *text* to *width* display columns, not characters."""
-    fill = max(0, width - _display_width(text))
-    return (' ' * fill + text) if align == 'right' else (text + ' ' * fill)
-
-
 # Collect the partitions that can be repacked from the current project.
 def _pack_candidates(option):
     """Return [(name, source, fsconfig, contexts, kind, size), ...]."""
@@ -311,22 +287,22 @@ def _select_pack_candidates(option, candidates):
         print(f' 合成: {name}.{suffix}')
         print('─' * 40)
         print(f'\n类型: {kind}')
-        print(f'大小: {_human_size(size)}')
+        print(f'大小: {human_size(size)}')
         print(f'输出: {out_label}/{name}.{suffix}')
         if input('\n是否继续? [Y/n] ').strip().lower() in ('n', 'no'):
             return []
         return candidates
 
     print(f'\n发现 {len(candidates)} 个可合成分区：\n')
-    print(f'  {_pad("序号", 4, "right")}  {_pad("分区名", 20)} '
-          f'{_pad("类型", 10)} {_pad("大小", 9, "right")}')
+    print(f'  {pad("序号", 4, "right")}  {pad("分区名", 20)} '
+          f'{pad("类型", 10)} {pad("大小", 9, "right")}')
     print(f'  {"-" * 4}  {"-" * 20} {"-" * 10} {"-" * 9}')
     for idx, (name, _source, _fsconfig, _contexts, kind, size) in enumerate(candidates, 1):
         # The index is padded to 2 then followed by 4 spaces: the digits sit two
         # columns left of the header's 4-wide field, while the columns after it
         # keep the header's alignment.
-        print(f'  {_pad(str(idx), 2, "right")}    {_pad(name, 20)} '
-              f'{_pad(kind, 10)} {_pad(_human_size(size), 9, "right")}')
+        print(f'  {pad(str(idx), 2, "right")}    {pad(name, 20)} '
+              f'{pad(kind, 10)} {pad(human_size(size), 9, "right")}')
 
     print(f'\n{YELLOW}输入要合成的 分区名/序号，all全选，空格分开，0跳过{CLOSE}')
     answer = input('> ').strip()

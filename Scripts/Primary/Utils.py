@@ -10,6 +10,7 @@ import sys
 import shlex
 import shutil
 import subprocess
+import unicodedata
 
 from pathlib import Path
 
@@ -231,6 +232,36 @@ def failure_log(log, exit_code):
                     + rendered[-(limit - 2):])
     return '\n'.join(rendered)
 
+
+
+# ---------------------------------------------------------------------------
+# Console formatting helpers
+# ---------------------------------------------------------------------------
+def human_size(size):
+    """Render a byte count for the selection tables."""
+    if size < 1024:
+        return f'{size} B'
+    if size < 1024 * 1024:
+        return f'{size / 1024:.1f} KB'
+    if size < 1024 * 1024 * 1024:
+        return f'{size / (1024 * 1024):.1f} MB'
+    return f'{size / (1024 * 1024 * 1024):.2f} GB'
+
+
+def display_width(text):
+    """Terminal columns a string occupies (CJK glyphs are double-width)."""
+    return sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1
+               for ch in text)
+
+
+def pad(text, width, align='left'):
+    """Pad *text* to *width* display columns, not characters.
+
+    str.ljust/rjust count characters, so a column of Chinese headings comes
+    out narrower than the ASCII rows under it and the table looks ragged.
+    """
+    fill = max(0, width - display_width(text))
+    return (' ' * fill + text) if align == 'right' else (text + ' ' * fill)
 
 
 # ---------------------------------------------------------------------------
