@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
-from Scripts.Primary.Utils import V
+from Scripts.Primary.Utils import V, display_width, human_size, pad
 from Scripts.Primary.ImageTools import expand_sparse_in_place
 from Scripts.Primary.WorkSpace import workspace_partition
 from Scripts.Primary.SuperTools import LpUnpack, LpUnpackError, unpack
@@ -166,18 +166,6 @@ def _get_out_dir():
     return ""
 
 
-def _human_size(b):
-    """Convert bytes to human-readable string."""
-    if b < 1024:
-        return f"{b} B"
-    elif b < 1024 * 1024:
-        return f"{b / 1024:.1f} KB"
-    elif b < 1024 * 1024 * 1024:
-        return f"{b / (1024 * 1024):.1f} MB"
-    else:
-        return f"{b / (1024 * 1024 * 1024):.2f} GB"
-
-
 # ---------------------------------------------------------------------------
 # Core: read super metadata and return [(name, group, size_bytes), ...].
 # ---------------------------------------------------------------------------
@@ -208,16 +196,36 @@ def _list_partitions(super_img_path):
 # UI: display the partition list and let the user select entries.
 # ---------------------------------------------------------------------------
 def _show_partitions(partitions):
-    """Print partition list, return indices of selected partitions."""
-    if not partitions:
-        print(f'{RED}> 未发现任何分区{CLOSE}')
+    """Print the selectable partitions, return the chosen (name, group, size).
+
+    Zero-byte partitions are dropped before the list is built: extracting one
+    only produces an empty .img that the next stage skips, so offering it as a
+    choice is a dead end. They are reported once instead, and the numbering
+    covers only what can actually be extracted.
+    """
+    empty = [name for name, _group, size in partitions if size <= 0]
+    selectable = [p for p in partitions if p[2] > 0]
+
+    if empty:
+        print(f'{YELLOW}> 跳过 {len(empty)} 个空分区（0 B）：{", ".join(empty)}{CLOSE}')
+    if not selectable:
+        print(f'{RED}> 未发现可提取的分区{CLOSE}')
         return []
 
-    print(f'\n{BOLD}发现 {len(partitions)} 个分区：{CLOSE}\n')
-    print(f'  {"序号":>4}  {"分区名":<20} {"组":<16} {"大小":>1}')
-    print(f'  {"----":>6}  {"-" * 20} {"-" * 18} {"-" * 10}')
-    for i, (name, group, size) in enumerate(partitions, 1):
-        print(f'  {i:>4}    {name:<20} {group:<18} {_human_size(size):>9}')
+    # Column widths follow the content: group names such as
+    # 'qti_dynamic_partitions_a' are wider than any fixed guess, and a fixed
+    # width pushes 大小 out of line with its separator.
+    name_w = max([display_width(p[0]) for p in selectable] + [8])
+    group_w = max([display_width(p[1]) for p in selectable] + [4])
+    size_w = 9
+
+    print(f'\n{BOLD}发现 {len(selectable)} 个分区：{CLOSE}\n')
+    print(f'  {pad("序号", 4, "right")}  {pad("分区名", name_w)}  '
+          f'{pad("组", group_w)} {pad("大小", size_w, "right")}')
+    print(f'  {"-" * 4}  {"-" * name_w}  {"-" * group_w} {"-" * size_w}')
+    for i, (name, group, size) in enumerate(selectable, 1):
+        print(f'  {pad(str(i), 4, "right")}  {pad(name, name_w)}  '
+              f'{pad(group, group_w)} {pad(human_size(size), size_w, "right")}')
 
     print(f'\n{YELLOW}请输入要提取的分区序号（多个用逗号分隔，如 1,3,5）：{CLOSE}')
     print(f'{YELLOW}  输入 0 跳过（不提取任何分区）{CLOSE}')
@@ -226,7 +234,7 @@ def _show_partitions(partitions):
     if not ans or ans == '0':
         return []
     if ans.lower() == 'all':
-        return list(range(len(partitions)))
+        return list(selectable)
 
     selected = []
     for token in ans.replace('，', ',').split(','):
@@ -235,8 +243,10 @@ def _show_partitions(partitions):
             continue
         try:
             idx = int(token)
-            if 1 <= idx <= len(partitions):
-                selected.append(idx - 1)
+            if 1 <= idx <= len(selectable):
+                entry = selectable[idx - 1]
+                if entry not in selected:
+                    selected.append(entry)
             else:
                 print(f'  {RED}无效序号: {idx}{CLOSE}')
         except ValueError:
@@ -248,17 +258,17 @@ def _show_partitions(partitions):
 # Core: extract the selected partitions.
 # ---------------------------------------------------------------------------
 # Extract selected logical partitions.
-def _extract_selected(super_img_path, stage_dir, partitions, selected_indices):
-    """Extract selected logical partitions into the WORKSPACE/super staging area.
+def _extract_selected(super_img_path, stage_dir, selected):
+    """Extract the chosen logical partitions into the WORKSPACE/super staging area.
 
     Returns the images actually written. They stay in the staging area until
     the caller either decomposes them or normalizes and moves them to OUT.
     """
-    if not selected_indices:
+    if not selected:
         print(f'{YELLOW}> 未选择任何分区，跳过提取{CLOSE}')
         return []
 
-    names = [partitions[i][0] for i in selected_indices]
+    names = [name for name, _group, _size in selected]
     print(f'\n{BOLD}> 开始提取 {len(names)} 个分区：{", ".join(names)}{CLOSE}')
     print()
 
@@ -360,7 +370,7 @@ def super_selective_main():
     # scratch space, and only what survives normalization reaches OUT.
     stage_dir = os.path.join(V.workspace, 'super') + os.sep
     shutil.rmtree(stage_dir, ignore_errors=True)
-    extracted = _extract_selected(effective_path, stage_dir, partitions, selected)
+    extracted = _extract_selected(effective_path, stage_dir, selected)
     if not extracted:
         shutil.rmtree(stage_dir, ignore_errors=True)
         return
@@ -368,7 +378,7 @@ def super_selective_main():
     print(f'{BOLD}> 已提取的镜像：{CLOSE}')
     for image, partition in extracted:
         print(f'  {os.path.basename(image)}  ->  {partition}  '
-              f'({_human_size(os.path.getsize(image))})')
+              f'({human_size(os.path.getsize(image))})')
     print()
     print(f'  镜像暂存于 {stage_dir}')
 
