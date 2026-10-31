@@ -156,6 +156,33 @@ def sparse_to_raw(source, destination=None, temp_dir=None):
         raise
     return destination
 
+# Expand a sparse input in place so every later stage reads a plain image.
+def expand_sparse_in_place(source):
+    """Expand a sparse image next to itself and replace the original.
+
+    The raw expansion is written to ``unsparse.super`` in the same directory
+    and then moved over the sparse file, i.e. the same result as
+    ``mv unsparse.super <name>``. Every entry point therefore sees one
+    already-expanded file, no matter which menu produced it.
+
+    Non-sparse sources are returned unchanged.
+    """
+    source = os.fspath(source)
+    if not is_sparse_image(source):
+        return source
+
+    parent = os.path.dirname(os.path.abspath(source)) or os.curdir
+    raw_path = os.path.join(parent, 'unsparse.super')
+    if os.path.abspath(raw_path) == os.path.abspath(source):
+        raise ValueError(f'unsparse.super 不能同时作为 sparse 的输入与输出: {source}')
+
+    print('Sparse image detected.')
+    print('Process conversion to non sparse image...')
+    sparse_to_raw(source, raw_path, temp_dir=parent)
+    os.replace(raw_path, source)
+    print('Result:[ok]')
+    return source
+
 # Encode raw blocks as DONT_CARE, FILL, or RAW sparse chunks.
 def raw_to_sparse(source, destination=None, block_size=4096, temp_dir=None):
     """Convert a raw image to Android sparse format and return its path.

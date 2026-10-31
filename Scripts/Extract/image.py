@@ -69,16 +69,21 @@ def decompress_img(source, distance=None, keep=1):
             print(f'> {partition} boot 分解失败: {error}')
 
     elif file_type == 'sparse':
-        from Scripts.Primary.ImageTools import sparse_to_raw
-        raw_source = os.path.join(V.workspace, f'.{partition}.unsparse.img')
+        # Expand the sparse file in place, then dispatch again on the raw
+        # image: the second pass sees ext / erofs / super and extracts it
+        # normally, so INPUT ends up holding a plain image either way.
+        from Scripts.Primary.ImageTools import expand_sparse_in_place
         try:
-            sparse_to_raw(working_source, raw_source, temp_dir=V.workspace)
-            decompress_img(raw_source, destination)
+            raw_source = expand_sparse_in_place(working_source)
         except (OSError, ValueError) as error:
-            print(f'> Sparse 转换失败: {error}')
-        finally:
-            if os.path.isfile(raw_source):
-                os.remove(raw_source)
+            print(f'Process log: {error}')
+            print('\x1b[1;31mFailed !\x1b[0m')
+            return
+        if get_file_type(raw_source) == 'sparse':
+            print('Process log: sparse 展开后仍是 sparse 镜像，已停止以避免递归')
+            print('\x1b[1;31mFailed !\x1b[0m')
+            return
+        decompress_img(raw_source, partition)
         return
 
     elif file_type == 'ext':
