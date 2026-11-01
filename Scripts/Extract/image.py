@@ -33,7 +33,7 @@ def decompress_img(source, distance=None, keep=1):
     """
     del keep
     source_type = get_file_type(source)
-    if source_type not in ('boot', 'vendor_boot', 'sparse', 'ext', 'erofs', 'super'):
+    if source_type not in ('boot', 'vendor_boot', 'sparse', 'ext', 'erofs', 'f2fs', 'super'):
         print(f'> 不支持的镜像类型: {source_type}')
         return
 
@@ -93,6 +93,10 @@ def decompress_img(source, distance=None, keep=1):
     elif file_type == 'erofs':
         from Scripts.Extract.erofs import extract_erofs
         committed = extract_erofs(working_source, partition, destination)
+
+    elif file_type == 'f2fs':
+        from Scripts.Extract.f2fs import extract_f2fs
+        committed = extract_f2fs(working_source, partition, destination)
 
     elif file_type == 'super':
         from Scripts.Extract.super import extract_super
