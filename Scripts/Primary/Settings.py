@@ -29,6 +29,13 @@ _SETUP_DEFAULTS = {
     'UTC': "LIVE",
     'UNPACK_SPLIT_DAT': "15",
     'BOOT_SKIP_RAMDISK': "0",
+    'F2FS_READONLY': "1",
+    'F2FS_COMPRESSION': "0",
+    'F2FS_COMP_ALGORITHM': "lz4",
+    'F2FS_COMP_CLUSTER': "2",
+    'F2FS_PRJQUOTA': "0",
+    'F2FS_CASEFOLD': "0",
+    'F2FS_RESERVE_MB': "16",
 }
 
 
@@ -40,10 +47,24 @@ def set_default_env_setup():
 
 
 def validate_default_env_setup(setup_manifest):
-    for k in ('REPACK_EROFS_IMG', 'REPACK_SPARSE_IMG', 'REPACK_TO_RW',
-              'RESIZE_IMG', 'IMAGE_SIZE', 'PATCH_FSCONFIG', 'PATCH_CONTEXTS'):
+    for k in ('REPACK_SPARSE_IMG', 'REPACK_TO_RW',
+              'RESIZE_IMG', 'IMAGE_SIZE', 'PATCH_FSCONFIG', 'PATCH_CONTEXTS',
+              'F2FS_READONLY', 'F2FS_COMPRESSION', 'F2FS_PRJQUOTA',
+              'F2FS_CASEFOLD'):
         if setup_manifest[k] not in ('1', '0'):
             sys.exit(f"Invalid [{k}] - must be one of <1/0>")
+
+    # 0:EXT4 1:EROFS 2:F2FS — the key keeps its old name so existing
+    # settings.json files stay valid.
+    if setup_manifest["REPACK_EROFS_IMG"] not in ('0', '1', '2'):
+        sys.exit("Invalid [REPACK_EROFS_IMG] - must be one of <0/1/2>")
+    if setup_manifest["F2FS_COMP_ALGORITHM"] not in ('lz4', 'lzo'):
+        sys.exit("Invalid [F2FS_COMP_ALGORITHM] - must be one of <lz4/lzo>")
+    cluster = setup_manifest["F2FS_COMP_CLUSTER"]
+    if not cluster.isdigit() or not 2 <= int(cluster) <= 8:
+        sys.exit("Invalid [F2FS_COMP_CLUSTER] - must be one of <2-8>")
+    if not setup_manifest["F2FS_RESERVE_MB"].isdigit():
+        sys.exit("Invalid [F2FS_RESERVE_MB] - must be a non-negative integer")
 
     if setup_manifest["RESIZE_EROFSIMG"] not in ('1', '2', '0'):
         sys.exit("Invalid [RESIZE_EROFSIMG] - must be one of <1/2/0>")
@@ -85,8 +106,17 @@ def env_setup():
             ('动态分区簇名称[qti_dynamic_partitions]', 'GROUP_NAME'),
             ('动态SUPER分区总大小[9126805504]', 'SUPER_SIZE'),
         ]),
+        ('F2FS', [
+            ('F2FS只读分区[0/1]', 'F2FS_READONLY'),
+            ('F2FS启用压缩[0/1]', 'F2FS_COMPRESSION'),
+            ('F2FS压缩算法[lz4/lzo]', 'F2FS_COMP_ALGORITHM'),
+            ('F2FS压缩簇大小[2-8]', 'F2FS_COMP_CLUSTER'),
+            ('F2FS项目配额[0/1]', 'F2FS_PRJQUOTA'),
+            ('F2FS大小写折叠[0/1]', 'F2FS_CASEFOLD'),
+            ('F2FS预留空间MB[16]', 'F2FS_RESERVE_MB'),
+        ]),
         ('IMG', [
-            ('合成镜像类型[0:EXT4/1:EROFS]', 'REPACK_EROFS_IMG'),
+            ('合成镜像类型[0:EXT4/1:EROFS/2:F2FS]', 'REPACK_EROFS_IMG'),
             ('合成镜像格式[0:RAW/1:SPARSE]', 'REPACK_SPARSE_IMG'),
             ('FS配置补全[0/1]', 'PATCH_FSCONFIG'),
             ('Contexts补全[0/1]', 'PATCH_CONTEXTS'),
