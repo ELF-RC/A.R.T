@@ -375,13 +375,10 @@ def super_selective_main():
         shutil.rmtree(stage_dir, ignore_errors=True)
         return
 
-    print(f'{BOLD}> 已提取的镜像：{CLOSE}')
-    for image, partition in extracted:
-        print(f'  {os.path.basename(image)}  ->  {partition}  '
-              f'({human_size(os.path.getsize(image))})')
-    print()
-    print(f'  镜像暂存于 {stage_dir}')
-
+    # No listing here: the staged files still carry their slot suffix
+    # (system_a.img) while what lands in OUT is normalized (system.img), so a
+    # table of the staged names reads as if the wrong names were written. The
+    # 已输出 lines below report the real result.
     if input('> 是否继续分解img [0/1]: ').strip() == '1':
         _decompose_extracted(stage_dir)
         shutil.rmtree(stage_dir, ignore_errors=True)
