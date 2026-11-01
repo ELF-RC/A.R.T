@@ -241,6 +241,14 @@ def menu_modules():
 # ---------------------------------------------------------------------------
 _PACK_FORMATS = {9: 'img', 10: 'new.dat', 11: 'new.dat.br'}
 
+# REPACK_EROFS_IMG picks the packer for every non-kernel partition. The key
+# predates f2fs, but reusing it keeps existing settings.json files working.
+_PACKERS = {'0': 'ext4', '1': 'erofs', '2': 'f2fs'}
+
+
+def _active_packer():
+    return _PACKERS.get(str(V.SETUP_MANIFEST.get("REPACK_EROFS_IMG", "1")), 'erofs')
+
 
 # Collect the partitions that can be repacked from the current project.
 def _pack_candidates(option):
@@ -250,7 +258,7 @@ def _pack_candidates(option):
         load_global_info, partition_metadata_names, workspace_partition,
     )
 
-    packer = 'erofs' if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "1" else 'ext4'
+    packer = _active_packer()
     candidates = []
     for name, record in sorted(load_global_info(V.config).items()):
         source = workspace_partition(name)
@@ -356,10 +364,13 @@ def menu_pack(option):
         if kind == 'kernel':
             boot_repack(source, V.out)
             continue
-        if V.SETUP_MANIFEST["REPACK_EROFS_IMG"] == "1":
-            recompress_erofs(source, fsconfig, contexts, infojson, int(option))
-        else:
+        if kind == 'f2fs':
+            from Scripts.ReMake.f2fs import recompress_f2fs
+            recompress_f2fs(source, fsconfig, contexts, infojson, int(option))
+        elif kind == 'ext4':
             recompress_ext4(source, fsconfig, contexts, infojson, int(option))
+        else:
+            recompress_erofs(source, fsconfig, contexts, infojson, int(option))
 
 
 # Fixed menu actions and main operation dispatcher.
